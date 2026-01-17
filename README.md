@@ -195,11 +195,11 @@ LinguaBridge supports 49 languages including:
 
 ## Building & Publishing Docker Images
 
-Before deploying to Akash or any container platform, you need to build and push the Docker images to a registry. LinguaBridge includes a release script that handles this for both GitHub Container Registry (GHCR) and Docker Hub.
+Before deploying to Akash or any container platform, you need to build and push the Docker images to a registry. LinguaBridge includes a release script that handles this for both GitHub Container Registry (GHCR) and Docker Hub, with full cross-architecture support.
 
 ### Prerequisites
 
-1. **Docker** installed and running
+1. **Docker** installed and running (with buildx for cross-platform builds)
 2. **Registry accounts**:
    - [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry): Use your GitHub account
    - [Docker Hub](https://hub.docker.com/): Create a free account
@@ -233,6 +233,47 @@ export DOCKERHUB_OWNER="your-org-or-username"
 ```
 
 **Note:** When pushing to an organization, you authenticate with your personal credentials, but the images are pushed to the organization's namespace. Ensure you have write access to the organization's packages.
+
+### Cross-Architecture Builds
+
+The release script supports building for different CPU architectures using Docker buildx. This is essential when building on Apple Silicon (arm64) for deployment on x86_64 servers (like most Akash providers).
+
+```bash
+# Build for amd64 only (default, typical for cloud deployments)
+./scripts/release.sh --tag v1.0.0 --ghcr
+
+# Build for your native architecture (auto-detected)
+./scripts/release.sh --tag v1.0.0 --ghcr --native
+
+# Build multi-architecture images (amd64 + arm64)
+./scripts/release.sh --tag v1.0.0 --ghcr --multi
+
+# Specify exact platforms
+./scripts/release.sh --tag v1.0.0 --platform linux/amd64 --ghcr
+./scripts/release.sh --tag v1.0.0 --platform linux/arm64 --ghcr
+./scripts/release.sh --tag v1.0.0 --platform linux/amd64,linux/arm64 --ghcr
+```
+
+| Option | Description |
+|--------|-------------|
+| `--platform PLATFORMS` | Comma-separated list of platforms (e.g., `linux/amd64,linux/arm64`) |
+| `--native` | Build only for your machine's native architecture |
+| `--multi` | Build for both amd64 and arm64 |
+
+**Architecture Notes:**
+
+- **Default**: `linux/amd64` - Works on most cloud providers and Akash Network
+- **Bot image**: Supports both `linux/amd64` and `linux/arm64`
+- **Inference image**: Only supports `linux/amd64` (NVIDIA CUDA limitation)
+
+When building on Apple Silicon for Akash deployment:
+
+```bash
+# Recommended: Build for amd64 (cross-compilation via buildx)
+./scripts/release.sh --tag v1.0.0 --platform linux/amd64 --all
+```
+
+The script automatically sets up Docker buildx and handles cross-compilation. First cross-platform build may take longer as it pulls the buildx builder image.
 
 ### Manual Build (Alternative)
 

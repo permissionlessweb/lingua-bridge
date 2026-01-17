@@ -1,30 +1,33 @@
 # Build stage
-FROM rust:1.75-bookworm AS builder
+FROM rust:1.92.0-trixie AS builder
 
 WORKDIR /app
 
-# Copy dependency files first for caching
+# Copy dependency files first for caching (including workspace members)
 COPY Cargo.toml Cargo.lock ./
+COPY admin-cli/Cargo.toml ./admin-cli/
 
-# Create dummy main.rs for dependency compilation
-RUN mkdir src && \
+# Create dummy source files for dependency compilation
+RUN mkdir -p src admin-cli/src && \
     echo "fn main() {}" > src/main.rs && \
-    cargo build --release && \
-    rm -rf src
+    echo "fn main() {}" > admin-cli/src/main.rs && \
+    cargo build --release -p linguabridge && \
+    rm -rf src admin-cli/src
 
 # Copy actual source code
 COPY src ./src
 COPY config ./config
 
-# Build the actual application
-RUN touch src/main.rs && cargo build --release
+# Build the actual application (only the bot, not admin-cli)
+RUN touch src/main.rs && cargo build --release -p linguabridge
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

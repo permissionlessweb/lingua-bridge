@@ -1,5 +1,10 @@
 # TranslateGemma Inference Service
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04
+#
+# NOTE: This image only supports linux/amd64 architecture.
+# NVIDIA CUDA images do not have official arm64 support.
+# For Apple Silicon (M1/M2/M3) development, use CPU mode or build for amd64.
+#
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 # Install Python and dependencies
 RUN apt-get update && apt-get install -y \
