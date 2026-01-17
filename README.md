@@ -210,9 +210,9 @@ Before deploying to Akash or any container platform, you need to build and push 
 ### Using the Release Script
 
 ```bash
-# Set your usernames
-export GITHUB_USER="your-github-username"
-export DOCKERHUB_USER="your-dockerhub-username"
+# Set the owner (your username OR organization name)
+export GHCR_OWNER="your-org-or-username"
+export DOCKERHUB_OWNER="your-org-or-username"
 
 # Build and push to both registries with a version tag
 ./scripts/release.sh --tag v1.0.0 --all
@@ -221,6 +221,9 @@ export DOCKERHUB_USER="your-dockerhub-username"
 ./scripts/release.sh --tag v1.0.0 --ghcr
 ./scripts/release.sh --tag v1.0.0 --dockerhub
 
+# Push to a GitHub organization (override via CLI)
+./scripts/release.sh --tag v1.0.0 --ghcr --ghcr-owner my-organization
+
 # Build only one image
 ./scripts/release.sh --tag v1.0.0 --bot-only --ghcr
 ./scripts/release.sh --tag v1.0.0 --inference-only --dockerhub
@@ -228,6 +231,8 @@ export DOCKERHUB_USER="your-dockerhub-username"
 # Preview what would happen (dry run)
 ./scripts/release.sh --tag v1.0.0 --all --dry-run
 ```
+
+**Note:** When pushing to an organization, you authenticate with your personal credentials, but the images are pushed to the organization's namespace. Ensure you have write access to the organization's packages.
 
 ### Manual Build (Alternative)
 
@@ -240,14 +245,16 @@ docker build -f docker/Dockerfile.rust -t linguabridge-bot:v1.0.0 .
 # Build inference image
 docker build -f docker/Dockerfile.inference -t linguabridge-inference:v1.0.0 .
 
-# Tag for GHCR
-docker tag linguabridge-bot:v1.0.0 ghcr.io/YOUR_USER/linguabridge-bot:v1.0.0
-docker tag linguabridge-inference:v1.0.0 ghcr.io/YOUR_USER/linguabridge-inference:v1.0.0
+# Tag for GHCR (replace YOUR_ORG with your org or username)
+docker tag linguabridge-bot:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
+docker tag linguabridge-inference:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
 
-# Login and push
-docker login ghcr.io -u YOUR_USER
-docker push ghcr.io/YOUR_USER/linguabridge-bot:v1.0.0
-docker push ghcr.io/YOUR_USER/linguabridge-inference:v1.0.0
+# Login (use your personal username, even for org pushes)
+docker login ghcr.io -u YOUR_USERNAME
+
+# Push to org namespace
+docker push ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
+docker push ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
 ```
 
 ### Update deploy.yaml
@@ -257,9 +264,9 @@ After pushing, update `deploy.yaml` with your image references:
 ```yaml
 services:
   inference:
-    image: ghcr.io/YOUR_USER/linguabridge-inference:v1.0.0
+    image: ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
   bot:
-    image: ghcr.io/YOUR_USER/linguabridge-bot:v1.0.0
+    image: ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
 ```
 
 ---

@@ -8,24 +8,37 @@
 #   ./scripts/release.sh [OPTIONS]
 #
 # Options:
-#   --tag TAG        Version tag (default: latest)
-#   --ghcr           Push to GitHub Container Registry
-#   --dockerhub      Push to Docker Hub
-#   --all            Push to both registries (default if no registry specified)
-#   --bot-only       Only build/push the bot image
-#   --inference-only Only build/push the inference image
-#   --no-cache       Build without Docker cache
-#   --dry-run        Show what would be done without executing
-#   -h, --help       Show this help message
+#   --tag TAG          Version tag (default: latest)
+#   --ghcr             Push to GitHub Container Registry
+#   --dockerhub        Push to Docker Hub
+#   --all              Push to both registries (default if no registry specified)
+#   --ghcr-owner NAME  Override GHCR_OWNER for this run
+#   --dockerhub-owner  Override DOCKERHUB_OWNER for this run
+#   --bot-only         Only build/push the bot image
+#   --inference-only   Only build/push the inference image
+#   --no-cache         Build without Docker cache
+#   --dry-run          Show what would be done without executing
+#   -h, --help         Show this help message
 #
 # Environment Variables:
-#   GITHUB_USER      GitHub username (required for GHCR)
-#   DOCKERHUB_USER   Docker Hub username (required for Docker Hub)
+#   GHCR_OWNER       GitHub username OR organization name (required for GHCR)
+#   DOCKERHUB_OWNER  Docker Hub username OR organization name (required for Docker Hub)
 #
 # Examples:
+#   # Push to personal account
+#   GHCR_OWNER=myusername ./scripts/release.sh --tag v1.0.0 --ghcr
+#
+#   # Push to GitHub organization
+#   GHCR_OWNER=my-org ./scripts/release.sh --tag v1.0.0 --ghcr
+#
+#   # Push to Docker Hub organization
+#   DOCKERHUB_OWNER=my-org ./scripts/release.sh --tag v1.0.0 --dockerhub
+#
+#   # Use command-line overrides
+#   ./scripts/release.sh --tag v1.0.0 --ghcr --ghcr-owner my-org
+#
+#   # Push to both registries
 #   ./scripts/release.sh --tag v1.0.0 --all
-#   ./scripts/release.sh --tag latest --ghcr
-#   ./scripts/release.sh --inference-only --dockerhub --tag v1.0.0
 
 set -euo pipefail
 
@@ -44,6 +57,10 @@ BUILD_BOT=true
 BUILD_INFERENCE=true
 NO_CACHE=""
 DRY_RUN=false
+
+# Owner overrides (can be set via CLI)
+CLI_GHCR_OWNER=""
+CLI_DOCKERHUB_OWNER=""
 
 # Image names
 BOT_IMAGE="linguabridge-bot"
@@ -97,6 +114,14 @@ while [[ $# -gt 0 ]]; do
             PUSH_DOCKERHUB=true
             shift
             ;;
+        --ghcr-owner)
+            CLI_GHCR_OWNER="$2"
+            shift 2
+            ;;
+        --dockerhub-owner)
+            CLI_DOCKERHUB_OWNER="$2"
+            shift 2
+            ;;
         --bot-only)
             BUILD_INFERENCE=false
             shift
@@ -131,16 +156,27 @@ if [ "$PUSH_GHCR" = false ] && [ "$PUSH_DOCKERHUB" = false ]; then
     PUSH_DOCKERHUB=true
 fi
 
+# Apply CLI overrides to environment variables
+if [ -n "$CLI_GHCR_OWNER" ]; then
+    GHCR_OWNER="$CLI_GHCR_OWNER"
+fi
+
+if [ -n "$CLI_DOCKERHUB_OWNER" ]; then
+    DOCKERHUB_OWNER="$CLI_DOCKERHUB_OWNER"
+fi
+
 # Validate environment
-if [ "$PUSH_GHCR" = true ] && [ -z "${GITHUB_USER:-}" ]; then
-    log_error "GITHUB_USER environment variable is required for GHCR"
-    log_info "Set it with: export GITHUB_USER=yourusername"
+if [ "$PUSH_GHCR" = true ] && [ -z "${GHCR_OWNER:-}" ]; then
+    log_error "GHCR_OWNER environment variable is required for GHCR"
+    log_info "Set it with: export GHCR_OWNER=your-username-or-org"
+    log_info "Or use: --ghcr-owner your-username-or-org"
     exit 1
 fi
 
-if [ "$PUSH_DOCKERHUB" = true ] && [ -z "${DOCKERHUB_USER:-}" ]; then
-    log_error "DOCKERHUB_USER environment variable is required for Docker Hub"
-    log_info "Set it with: export DOCKERHUB_USER=yourusername"
+if [ "$PUSH_DOCKERHUB" = true ] && [ -z "${DOCKERHUB_OWNER:-}" ]; then
+    log_error "DOCKERHUB_OWNER environment variable is required for Docker Hub"
+    log_info "Set it with: export DOCKERHUB_OWNER=your-username-or-org"
+    log_info "Or use: --dockerhub-owner your-username-or-org"
     exit 1
 fi
 
@@ -194,10 +230,12 @@ push_image() {
 # Login to registries
 if [ "$PUSH_GHCR" = true ] && [ "$DRY_RUN" = false ]; then
     log_info "Logging in to GitHub Container Registry..."
+    log_info "Owner/Org: $GHCR_OWNER"
     echo "Please enter your GitHub Personal Access Token (with write:packages scope):"
     if [ -t 0 ]; then
-        # Interactive mode
-        docker login ghcr.io -u "$GITHUB_USER"
+        # Interactive mode - use your personal username for auth, even when pushing to org
+        read -rp "GitHub username for authentication: " GITHUB_AUTH_USER
+        docker login ghcr.io -u "$GITHUB_AUTH_USER"
     else
         log_warn "Non-interactive mode - assuming already logged in to GHCR"
     fi
@@ -205,9 +243,11 @@ fi
 
 if [ "$PUSH_DOCKERHUB" = true ] && [ "$DRY_RUN" = false ]; then
     log_info "Logging in to Docker Hub..."
+    log_info "Owner/Org: $DOCKERHUB_OWNER"
     if [ -t 0 ]; then
-        # Interactive mode
-        docker login -u "$DOCKERHUB_USER"
+        # Interactive mode - use your personal username for auth, even when pushing to org
+        read -rp "Docker Hub username for authentication: " DOCKERHUB_AUTH_USER
+        docker login -u "$DOCKERHUB_AUTH_USER"
     else
         log_warn "Non-interactive mode - assuming already logged in to Docker Hub"
     fi
@@ -224,27 +264,27 @@ fi
 
 # Push to GHCR
 if [ "$PUSH_GHCR" = true ]; then
-    log_info "Pushing to GitHub Container Registry..."
+    log_info "Pushing to GitHub Container Registry (owner: $GHCR_OWNER)..."
 
     if [ "$BUILD_BOT" = true ]; then
-        push_image "$BOT_IMAGE" "ghcr.io/$GITHUB_USER/$BOT_IMAGE"
+        push_image "$BOT_IMAGE" "ghcr.io/$GHCR_OWNER/$BOT_IMAGE"
     fi
 
     if [ "$BUILD_INFERENCE" = true ]; then
-        push_image "$INFERENCE_IMAGE" "ghcr.io/$GITHUB_USER/$INFERENCE_IMAGE"
+        push_image "$INFERENCE_IMAGE" "ghcr.io/$GHCR_OWNER/$INFERENCE_IMAGE"
     fi
 fi
 
 # Push to Docker Hub
 if [ "$PUSH_DOCKERHUB" = true ]; then
-    log_info "Pushing to Docker Hub..."
+    log_info "Pushing to Docker Hub (owner: $DOCKERHUB_OWNER)..."
 
     if [ "$BUILD_BOT" = true ]; then
-        push_image "$BOT_IMAGE" "$DOCKERHUB_USER/$BOT_IMAGE"
+        push_image "$BOT_IMAGE" "$DOCKERHUB_OWNER/$BOT_IMAGE"
     fi
 
     if [ "$BUILD_INFERENCE" = true ]; then
-        push_image "$INFERENCE_IMAGE" "$DOCKERHUB_USER/$INFERENCE_IMAGE"
+        push_image "$INFERENCE_IMAGE" "$DOCKERHUB_OWNER/$INFERENCE_IMAGE"
     fi
 fi
 
@@ -257,18 +297,18 @@ log_info "Image references for deploy.yaml:"
 echo ""
 if [ "$BUILD_BOT" = true ]; then
     if [ "$PUSH_GHCR" = true ]; then
-        echo "  GHCR Bot:       ghcr.io/$GITHUB_USER/$BOT_IMAGE:$TAG"
+        echo "  GHCR Bot:           ghcr.io/$GHCR_OWNER/$BOT_IMAGE:$TAG"
     fi
     if [ "$PUSH_DOCKERHUB" = true ]; then
-        echo "  DockerHub Bot:  $DOCKERHUB_USER/$BOT_IMAGE:$TAG"
+        echo "  Docker Hub Bot:     $DOCKERHUB_OWNER/$BOT_IMAGE:$TAG"
     fi
 fi
 if [ "$BUILD_INFERENCE" = true ]; then
     if [ "$PUSH_GHCR" = true ]; then
-        echo "  GHCR Inference: ghcr.io/$GITHUB_USER/$INFERENCE_IMAGE:$TAG"
+        echo "  GHCR Inference:     ghcr.io/$GHCR_OWNER/$INFERENCE_IMAGE:$TAG"
     fi
     if [ "$PUSH_DOCKERHUB" = true ]; then
-        echo "  DockerHub Inference: $DOCKERHUB_USER/$INFERENCE_IMAGE:$TAG"
+        echo "  Docker Hub Inference: $DOCKERHUB_OWNER/$INFERENCE_IMAGE:$TAG"
     fi
 fi
 echo ""
