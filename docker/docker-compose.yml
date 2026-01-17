@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  # TranslateGemma inference service
+  inference:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.inference
+    container_name: linguabridge-inference
+    restart: unless-stopped
+    environment:
+      - DEVICE=cuda
+      - TORCH_DTYPE=bfloat16
+      - TRANSLATEGEMMA_MODEL=${TRANSLATEGEMMA_MODEL:-google/translategemma-4b-it}
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - linguabridge-cache:/root/.cache/linguabridge
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+    networks:
+      - linguabridge
+
+  # LinguaBridge bot and web server
+  bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rust
+    container_name: linguabridge-bot
+    restart: unless-stopped
+    depends_on:
+      inference:
+        condition: service_healthy
+    environment:
+      # IMPORTANT: Discord token is NOT set here.
+      # It is securely provisioned at runtime via admin CLI.
+      # The admin public key MUST be set for secure provisioning.
+      - LINGUABRIDGE_ADMIN__PUBLIC_KEY=${ADMIN_PUBLIC_KEY}
+      - LINGUABRIDGE_ADMIN__PORT=9999
+      - LINGUABRIDGE_ADMIN__HOST=0.0.0.0
+      - LINGUABRIDGE_INFERENCE__URL=http://inference:8000
+      - LINGUABRIDGE_WEB__HOST=0.0.0.0
+      - LINGUABRIDGE_WEB__PORT=3000
+      - LINGUABRIDGE_WEB__PUBLIC_URL=${PUBLIC_URL:-http://localhost:3000}
+      - LINGUABRIDGE_DATABASE__URL=sqlite:///app/data/linguabridge.db?mode=rwc
+      - RUST_LOG=linguabridge=info,tower_http=info
+    volumes:
+      - bot-data:/app/data
+    ports:
+      # Web interface
+      - "${WEB_PORT:-3000}:3000"
+      # Admin provisioning endpoint (secure: only expose on trusted networks!)
+      - "${ADMIN_PORT:-9999}:9999"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - linguabridge
+
+networks:
+  linguabridge:
+    driver: bridge
+
+volumes:
+  huggingface-cache:
+  linguabridge-cache:
+  bot-data:

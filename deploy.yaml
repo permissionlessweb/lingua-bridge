@@ -1,0 +1,132 @@
+# LinguaBridge Akash Network Deployment
+#
+# This SDL (Stack Definition Language) file deploys LinguaBridge to Akash Network.
+#
+# Before deploying:
+# 1. Generate admin keys: cargo run -p admin-cli -- keygen
+# 2. Replace <YOUR_ADMIN_PUBLIC_KEY> with contents of admin.pub
+# 3. Build and push Docker images to a registry
+#
+# After deployment:
+# 1. Note the assigned URIs from Akash
+# 2. Provision the bot: linguabridge-admin provision --bot-url https://<akash-uri>:9999 --discord-token "token" --admin-key admin.key
+
+version: "2.0"
+
+services:
+  # TranslateGemma inference service (GPU required)
+  inference:
+    image: ghcr.io/yourusername/linguabridge-inference:latest
+    env:
+      - DEVICE=cuda
+      - TORCH_DTYPE=bfloat16
+      - TRANSLATEGEMMA_MODEL=google/translategemma-4b-it
+      - HOST=0.0.0.0
+      - PORT=8000
+    expose:
+      # Internal only - bot connects to this
+      - port: 8000
+        as: 8000
+        to:
+          - service: bot
+
+  # LinguaBridge Discord bot and web server
+  bot:
+    image: ghcr.io/yourusername/linguabridge-bot:latest
+    depends_on:
+      - service: inference
+    env:
+      # IMPORTANT: Replace with your admin public key (from admin.pub)
+      # This is safe to expose - it's just the public key for verification
+      - LINGUABRIDGE_ADMIN__PUBLIC_KEY=<YOUR_ADMIN_PUBLIC_KEY>
+      - LINGUABRIDGE_ADMIN__PORT=9999
+      - LINGUABRIDGE_ADMIN__HOST=0.0.0.0
+      # Internal service URL (Akash DNS)
+      - LINGUABRIDGE_INFERENCE__URL=http://inference:8000
+      - LINGUABRIDGE_INFERENCE__MODEL=google/translategemma-4b-it
+      # Web server config
+      - LINGUABRIDGE_WEB__HOST=0.0.0.0
+      - LINGUABRIDGE_WEB__PORT=3000
+      # Update this after deployment with your actual Akash URI
+      - LINGUABRIDGE_WEB__PUBLIC_URL=https://your-deployment.akash.network
+      # Database (persistent storage)
+      - LINGUABRIDGE_DATABASE__URL=sqlite:///data/linguabridge.db?mode=rwc
+      - RUST_LOG=linguabridge=info,tower_http=info
+    expose:
+      # Web interface - publicly accessible
+      - port: 3000
+        as: 80
+        to:
+          - global: true
+        accept:
+          - linguabridge.yourdomain.com
+      # Admin provisioning endpoint - publicly accessible for remote provisioning
+      # Security: Only accepts signed requests from admin key holder
+      - port: 9999
+        as: 9999
+        to:
+          - global: true
+    params:
+      storage:
+        data:
+          mount: /data
+          readOnly: false
+
+profiles:
+  compute:
+    inference:
+      resources:
+        cpu:
+          units: 4
+        memory:
+          size: 16Gi
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: rtx3080
+                - model: rtx3090
+                - model: rtx4080
+                - model: rtx4090
+                - model: a100
+        storage:
+          - size: 20Gi  # Model cache
+    bot:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 512Mi
+        storage:
+          - name: data
+            size: 1Gi
+            attributes:
+              persistent: true
+              class: beta3
+
+  placement:
+    akash:
+      attributes:
+        host: akash
+      signedBy:
+        anyOf:
+          - akash1365ez3m5ess395e8fs2zyzgqvxhfr3vqwcpqp7
+          - akash18qa2a2ltfyvkyj0ggj3hkvuj6twzyumuaru9s4
+      pricing:
+        inference:
+          denom: uakt
+          amount: 10000
+        bot:
+          denom: uakt
+          amount: 1000
+
+deployment:
+  inference:
+    akash:
+      profile: inference
+      count: 1
+  bot:
+    akash:
+      profile: bot
+      count: 1

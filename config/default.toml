@@ -1,0 +1,61 @@
+# LinguaBridge Default Configuration
+# NOTE: Sensitive values (Discord token, etc.) are NOT in this file.
+# They are provided via secure admin provisioning.
+
+[admin]
+# Admin's Ed25519 public key (base64 encoded)
+# Generate with: linguabridge-admin keygen
+# This is the ONLY trust anchor for provisioning secrets.
+# REQUIRED: You must set this to your admin public key.
+public_key = ""
+# Port for admin provisioning endpoint
+port = 9999
+# Host for admin provisioning endpoint
+host = "0.0.0.0"
+
+[discord]
+# Discord application ID (optional, for OAuth flows)
+# The bot TOKEN is provided via secure admin provisioning, not here.
+# application_id = ""
+
+[inference]
+# URL of the Python inference sidecar
+url = "http://localhost:8000"
+# TranslateGemma model to use (4b-it, 12b-it, or 27b-it)
+model = "google/translategemma-4b-it"
+# Request timeout in seconds
+timeout_secs = 30
+# Maximum retries for failed requests
+max_retries = 3
+
+[web]
+# Web server host
+host = "0.0.0.0"
+# Web server port
+port = 3000
+# Session token expiry in hours
+session_expiry_hours = 24
+# Public URL for generating links (override in production)
+public_url = "http://localhost:3000"
+
+[database]
+# Database URL (SQLite for dev, PostgreSQL for production)
+url = "sqlite://linguabridge.db?mode=rwc"
+# Maximum database connections
+max_connections = 10
+
+[translation]
+# Default target languages for new guilds
+default_languages = ["en"]
+# Maximum message length to translate
+max_message_length = 2000
+# Cache TTL in seconds
+cache_ttl_secs = 3600
+# Maximum cached translations
+cache_max_size = 10000
+
+[rate_limits]
+# Messages per minute per user (free tier)
+free_messages_per_minute = 10
+# Messages per minute per user (paid tier)
+paid_messages_per_minute = 100

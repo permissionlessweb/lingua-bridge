@@ -1,0 +1,54 @@
+# Build stage
+FROM rust:1.75-bookworm AS builder
+
+WORKDIR /app
+
+# Copy dependency files first for caching
+COPY Cargo.toml Cargo.lock ./
+
+# Create dummy main.rs for dependency compilation
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    cargo build --release && \
+    rm -rf src
+
+# Copy actual source code
+COPY src ./src
+COPY config ./config
+
+# Build the actual application
+RUN touch src/main.rs && cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/linguabridge /app/linguabridge
+
+# Copy config and static files
+COPY config ./config
+COPY static ./static
+
+# Create data directory
+RUN mkdir -p /app/data
+
+# Set environment variables
+ENV RUST_LOG=linguabridge=info,tower_http=info
+ENV LINGUABRIDGE_DATABASE__URL=sqlite:///app/data/linguabridge.db?mode=rwc
+
+# Expose ports
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+# Run the application
+CMD ["/app/linguabridge"]
