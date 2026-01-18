@@ -15,7 +15,7 @@ use chacha20poly1305::{
 };
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use ed25519_dalek::{Signer, SigningKey};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

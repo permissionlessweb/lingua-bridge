@@ -1,19 +1,18 @@
 use crate::config::AppConfig;
-use crate::db::{DbPool, WebSessionRepo};
+use crate::db::WebSessionRepo;
 use crate::translation::TranslationClient;
+use crate::web::voice_routes::{voice_view, voice_ws_handler, VoiceAppState};
 use crate::web::websocket::AppState;
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
-    response::{Html, IntoResponse, Json},
-    routing::{get, post},
+    extract::{Path, State},
+    response::{Html, Json},
+    routing::get,
     Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
-use tracing::info;
 
 /// Health check response
 #[derive(Serialize)]
@@ -321,12 +320,24 @@ pub fn create_router(state: AppState, translator: Arc<TranslationClient>) -> Rou
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Voice routes state
+    let voice_state = VoiceAppState {
+        broadcast: state.broadcast.clone(),
+    };
+
     Router::new()
         .route("/health", get(health))
+        // Text channel translation routes (session-based)
         .route("/view/{session_id}", get(web_view))
         .route("/ws/{session_id}", get(crate::web::websocket::ws_handler))
         .route("/api/session/{session_id}", get(get_session_info))
         .with_state(state)
+        // Voice channel routes (public)
+        .route("/voice/{guild_id}/{channel_id}", get(voice_view))
+        .route(
+            "/voice/{guild_id}/{channel_id}/ws",
+            get(voice_ws_handler).with_state(voice_state),
+        )
         .route(
             "/api/cache/stats",
             get(cache_stats).with_state(translator),

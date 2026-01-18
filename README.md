@@ -5,10 +5,12 @@ Real-time Discord translation bot powered by Google's TranslateGemma models. Tra
 ## Features
 
 - **Real-time translation** - Automatically translates messages in configured channels
+- **Voice channel translation** - Live speech-to-text, translation, and optional TTS playback
+- **Voice Web View** - Browser-based real-time transcription with relative timestamps and TTS audio toggle
+- **Discord Thread Transcripts** - Automatically post voice transcripts to language-specific threads
 - **49+ languages** - Powered by Google's TranslateGemma (4B, 12B, or 27B parameters)
 - **Automatic language detection** - No need to specify source language
 - **User preferences** - Each user sets their preferred language
-- **Web viewer** - Browser-based interface for reading translations
 - **Secure provisioning** - Cryptographic admin transport protects API keys
 
 ---
@@ -32,6 +34,9 @@ Before deploying, set up your Discord application:
    - Send Messages
    - Embed Links
    - Read Message History
+   - Connect (for voice channels)
+   - Speak (for TTS playback)
+   - Use Voice Activity (to receive audio)
 9. Copy the generated URL at the bottom and open it in your browser
 10. Select the server to add the bot to and authorize it
 
@@ -143,24 +148,48 @@ The bot will connect to Discord once provisioned:
 
 Once the bot is running, use these slash commands in your Discord server:
 
+### Server Setup (Admin)
+
 | Command | Description |
 |---------|-------------|
 | `/setup init` | Initialize LinguaBridge for your server |
-| `/setup channel #channel enable:true` | Enable translation in a channel |
+| `/setup channel #channel enable:true` | Enable translation in a text channel |
 | `/setup languages en,es,fr` | Set target languages for the server |
 | `/setup status` | View current configuration |
+
+### Text Translation
+
+| Command | Description |
+|---------|-------------|
 | `/translate text:Hello target:es` | Translate text to a specific language |
 | `/languages` | List all supported languages |
 | `/mylang es` | Set your preferred language |
 | `/mypreferences` | View your current preferences |
 | `/webview` | Get a link to the web translation viewer |
 
+### Voice Translation
+
+| Command | Description |
+|---------|-------------|
+| `/voice join [channel]` | Bot joins your voice channel (or specified channel) |
+| `/voice leave` | Bot leaves the voice channel |
+| `/voice status` | View voice translation status |
+| `/voice url [channel]` | Get public web URL for viewing voice transcripts |
+| `/voice transcript enable:true [text_channel] [languages]` | Enable transcript posting to Discord threads |
+| `/voiceconfig language:es tts:true` | Configure voice channel settings |
+
 ### Initial Server Setup
 
 1. Run `/setup init` as a server admin
-2. Run `/setup channel #general enable:true` for each channel to translate
+2. Run `/setup channel #general enable:true` for each text channel to translate
 3. Run `/setup languages en,es,fr,de` to set target languages
 4. Users run `/mylang <code>` to set their preferred language
+
+### Voice Channel Setup
+
+1. Have the bot join your voice channel with `/voice join`
+2. Get the web view URL with `/voice url` and share it with participants
+3. Optionally enable Discord thread transcripts with `/voice transcript enable:true languages:en,es,fr`
 
 ---
 
@@ -190,6 +219,90 @@ LinguaBridge supports 49 languages including:
 | | | mr | Marathi | | |
 | | | no | Norwegian | | |
 | | | fa | Persian | | |
+
+---
+
+## Voice Web View (End Users)
+
+The Voice Web View provides a browser-based interface for viewing real-time voice translations. Anyone with the URL can view transcriptions without needing Discord.
+
+### Accessing the Web View
+
+1. Ask a server moderator to run `/voice url` in Discord
+2. Open the provided URL in any modern browser
+3. The page connects automatically and displays live transcriptions
+
+**URL Format:** `https://your-server.com/voice/{guild_id}/{channel_id}`
+
+### Web View Features
+
+- **Real-time transcriptions** - See what's being said as it happens
+- **Relative timestamps** - "5 seconds ago", "1 minute ago" automatically updating
+- **Speaker identification** - See who is speaking with color-coded names
+- **Language badges** - Shows source and target language for each message (e.g., "ES → EN")
+- **TTS audio toggle** - Listen to translated speech with play/pause/volume controls
+- **Auto-reconnection** - Automatically reconnects if connection is lost
+
+### TTS Audio Playback
+
+The web view includes an audio player for TTS (text-to-speech) playback:
+
+1. Click **Play** to start listening to translated audio
+2. Audio messages are queued and played sequentially
+3. Use the volume slider to adjust playback level
+4. Click **Mute** to silence audio while keeping it queued
+
+**Note:** TTS must be enabled on the server for audio to be available.
+
+### Requirements
+
+- Modern web browser (Chrome, Firefox, Safari, Edge)
+- JavaScript enabled
+- WebSocket support (all modern browsers)
+
+---
+
+## Discord Thread Transcripts (Moderators)
+
+Moderators can configure the bot to post voice transcripts to Discord threads, creating a searchable archive of voice conversations.
+
+### Setting Up Thread Transcripts
+
+1. Join the voice channel you want to transcribe
+2. Run the command:
+   ```
+   /voice transcript enable:true text_channel:#transcripts languages:en,es,fr
+   ```
+3. The bot creates threads for each language:
+   - "Voice Translation - English"
+   - "Voice Translation - Spanish"
+   - "Voice Translation - French"
+
+### Transcript Format
+
+Messages appear in threads as:
+
+```
+**Username**
+> Original text in source language
+Translated text in target language
+```
+
+### Managing Transcripts
+
+| Action | Command |
+|--------|---------|
+| Enable transcripts | `/voice transcript enable:true languages:en,es` |
+| Disable transcripts | `/voice transcript enable:false` |
+| Change text channel | `/voice transcript enable:true text_channel:#new-channel` |
+| Add languages | Re-run the command with updated language list |
+
+### Notes
+
+- Threads are created in the specified text channel (or current channel if not specified)
+- Each language gets its own thread for organized archives
+- Threads auto-archive after 24 hours of inactivity (Discord default)
+- Transcripts persist in Discord even if the bot goes offline
 
 ---
 
@@ -227,6 +340,7 @@ export DOCKERHUB_OWNER="your-org-or-username"
 # Build only one image
 ./scripts/release.sh --tag v1.0.0 --bot-only --ghcr
 ./scripts/release.sh --tag v1.0.0 --inference-only --dockerhub
+./scripts/release.sh --tag v1.0.0 --voice-only --ghcr
 
 # Preview what would happen (dry run)
 ./scripts/release.sh --tag v1.0.0 --all --dry-run
@@ -265,6 +379,7 @@ The release script supports building for different CPU architectures using Docke
 - **Default**: `linux/amd64` - Works on most cloud providers and Akash Network
 - **Bot image**: Supports both `linux/amd64` and `linux/arm64`
 - **Inference image**: Only supports `linux/amd64` (NVIDIA CUDA limitation)
+- **Voice image**: Only supports `linux/amd64` (NVIDIA CUDA limitation)
 
 When building on Apple Silicon for Akash deployment:
 
@@ -286,9 +401,13 @@ docker build -f docker/Dockerfile.rust -t linguabridge-bot:v1.0.0 .
 # Build inference image
 docker build -f docker/Dockerfile.inference -t linguabridge-inference:v1.0.0 .
 
+# Build voice inference image
+docker build -f docker/Dockerfile.voice -t linguabridge-voice:v1.0.0 .
+
 # Tag for GHCR (replace YOUR_ORG with your org or username)
 docker tag linguabridge-bot:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
 docker tag linguabridge-inference:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
+docker tag linguabridge-voice:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-voice:v1.0.0
 
 # Login (use your personal username, even for org pushes)
 docker login ghcr.io -u YOUR_USERNAME
@@ -306,6 +425,8 @@ After pushing, update `deploy.yaml` with your image references:
 services:
   inference:
     image: ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
+  voice-inference:
+    image: ghcr.io/YOUR_ORG/linguabridge-voice:v1.0.0
   bot:
     image: ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
 ```
@@ -339,6 +460,14 @@ cargo run -p admin-cli --release -- provision \
 ### Akash Network Deployment
 
 LinguaBridge includes an Akash SDL file (`deploy.yaml`) for decentralized deployment. The secure admin provisioning system ensures your Discord token and API keys are never exposed to Akash providers.
+
+**Quick Setup:** Run the interactive configuration wizard to generate a ready-to-deploy SDL:
+
+```bash
+./scripts/configure-deploy.sh
+```
+
+This walks you through setting up GHCR credentials, admin keys, and image references, then generates `deploy-configured.yaml`.
 
 #### Step 1: Prepare for Deployment
 
@@ -405,6 +534,11 @@ This ensures that even Akash providers with access to your container cannot extr
 | `LINGUABRIDGE_WEB__PORT` | `3000` | Web server port |
 | `LINGUABRIDGE_WEB__PUBLIC_URL` | `http://localhost:3000` | Public URL for links |
 | `LINGUABRIDGE_DATABASE__URL` | `sqlite://linguabridge.db` | Database connection |
+| `LINGUABRIDGE_VOICE__URL` | `ws://voice-inference:8001/voice` | Voice inference WebSocket |
+| `LINGUABRIDGE_VOICE__ENABLE_TTS_PLAYBACK` | `false` | Play TTS in Discord voice |
+| `LINGUABRIDGE_VOICE__BUFFER_MS` | `500` | Audio buffer size (ms) |
+| `LINGUABRIDGE_VOICE__VAD_THRESHOLD` | `0.5` | VAD sensitivity (0.0-1.0) |
+| `LINGUABRIDGE_VOICE__DEFAULT_TARGET_LANGUAGE` | `en` | Default voice target language |
 | `RUST_LOG` | `linguabridge=info` | Log level |
 
 ### Model Selection
@@ -414,6 +548,27 @@ This ensures that even Akash providers with access to your container cannot extr
 | `google/translategemma-4b-it` | ~8GB | Fast | Good |
 | `google/translategemma-12b-it` | ~24GB | Medium | Better |
 | `google/translategemma-27b-it` | ~54GB | Slower | Best |
+
+### Voice Inference Service
+
+The voice inference service runs separately and requires its own configuration:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEVICE` | `cuda` | Compute device (cuda/cpu) |
+| `STT_MODEL` | `distil-large-v3` | Whisper model for speech-to-text |
+| `TTS_MODEL` | `CosyVoice2-0.5B` | Model for text-to-speech |
+| `ENABLE_TTS` | `true` | Enable TTS synthesis |
+| `ENABLE_DIARIZATION` | `false` | Speaker diarization (requires HF token) |
+| `HF_TOKEN` | (optional) | HuggingFace token for pyannote models |
+| `HOST` | `0.0.0.0` | Service bind address |
+| `PORT` | `8001` | Service port |
+
+**Resource Requirements:**
+
+| Service | VRAM | RAM | Notes |
+|---------|------|-----|-------|
+| Voice Inference | ~16-24GB | 24GB | STT + Translation + TTS models |
 
 ---
 
@@ -494,27 +649,72 @@ Make sure you're using the correct admin.key file that matches the public key co
 
 The bot only accepts provisioning once per restart. Restart the bot to re-provision.
 
+### Voice translation issues
+
+**Bot doesn't join voice channel**
+
+Ensure the bot has Connect and Speak permissions in the voice channel. Check that `GUILD_VOICE_STATES` intent is enabled.
+
+**No transcription appearing**
+
+1. Check voice inference service is running: `curl http://localhost:8001/health`
+2. Verify `LINGUABRIDGE_VOICE__URL` points to the correct WebSocket endpoint
+3. Check bot logs for "Failed to send audio to inference" errors
+
+**Voice models fail to load**
+
+For speaker diarization, you need a HuggingFace token with pyannote license accepted:
+1. Visit <https://huggingface.co/pyannote/speaker-diarization-3.1>
+2. Accept the license
+3. Set `HF_TOKEN` environment variable
+
 ---
 
 ## Architecture
 
 ```
-                                    +------------------+
-                                    |   Discord API    |
-                                    +--------+---------+
-                                             |
-+----------------+                  +--------+---------+
-|  Admin CLI     |  provision -->  |  LinguaBridge    |
-| (local machine)|                 |  (Rust binary)   |
-+----------------+                 +--------+---------+
-                                            |
-                              +-------------+-------------+
-                              |                           |
-                     +--------+--------+         +--------+--------+
-                     | Inference Svc   |         |   Web Server    |
-                     | (Python/FastAPI)|         |   (Axum)        |
-                     +-----------------+         +-----------------+
+                                      +------------------+
+                                      |   Discord API    |
+                                      +--------+---------+
+                                               |
+                                               | (messages + voice)
+  +----------------+                  +--------+---------+
+  |  Admin CLI     |  provision -->  |  LinguaBridge    |
+  | (local machine)|                 |  (Rust binary)   |
+  +----------------+                 +--------+---------+
+                                              |
+                      +-----------------------+------------------------+
+                      |                       |                        |
+             +--------+--------+    +---------+---------+    +---------+--------+
+             | Text Inference  |    | Voice Inference   |    |   Web Server     |
+             | (Python/FastAPI)|    | (Python/WebSocket)|    |   (Axum)         |
+             | Port 8000       |    | Port 8001         |    |   Port 3000      |
+             +-----------------+    +-------------------+    +--------+---------+
+                                                                      |
+                                              +-----------------------+
+                                              |                       |
+                                    +---------+--------+    +---------+---------+
+                                    | Text Web View    |    | Voice Web View    |
+                                    | /view/{session}  |    | /voice/{g}/{c}    |
+                                    | (session-based)  |    | (public access)   |
+                                    +------------------+    +-------------------+
+                                                                      |
+                                                            +---------+---------+
+                                                            | Discord Threads   |
+                                                            | (per-language     |
+                                                            |  transcripts)     |
+                                                            +-------------------+
 ```
+
+### Web Routes
+
+| Route | Access | Purpose |
+|-------|--------|---------|
+| `/view/{session_id}` | Session-based | Text channel translation viewer |
+| `/voice/{guild_id}/{channel_id}` | Public | Voice channel transcription viewer |
+| `/voice/{guild_id}/{channel_id}/ws` | WebSocket | Real-time voice transcription stream |
+| `/health` | Public | Health check endpoint |
+| `/api/session/{session_id}` | Public | Session info API |
 
 ---
 
@@ -595,26 +795,42 @@ linguabridge/
 │   ├── bot/                # Discord bot (serenity/poise)
 │   │   ├── mod.rs          # Bot setup with start_bot_with_token()
 │   │   ├── handler.rs      # Message event handler
-│   │   └── commands/       # Slash commands (setup, translate, mylang, webview)
+│   │   └── commands/       # Slash commands (setup, translate, mylang, webview, voice)
+│   ├── voice/              # Voice translation pipeline
+│   │   ├── mod.rs          # VoiceManager exports
+│   │   ├── bridge.rs       # Bridges voice results to web/Discord threads
+│   │   ├── handler.rs      # Songbird audio receiver
+│   │   ├── buffer.rs       # Per-user audio buffers with VAD
+│   │   ├── client.rs       # WebSocket client for inference
+│   │   ├── playback.rs     # TTS playback to Discord
+│   │   └── types.rs        # AudioPacket, AudioSegment, WebSocket messages
 │   ├── web/                # Web server (axum)
 │   │   ├── mod.rs          # Server setup
-│   │   ├── routes.rs       # HTTP routes
+│   │   ├── routes.rs       # HTTP routes + text web view
+│   │   ├── voice_routes.rs # Voice web view routes (/voice/{g}/{c})
+│   │   ├── broadcast.rs    # WebSocket broadcast manager
 │   │   └── websocket.rs    # WebSocket for live translations
 │   ├── db/                 # Database layer (sqlx/sqlite)
 │   │   ├── mod.rs          # Pool and repos
-│   │   └── models.rs       # Guild, User, Session models
+│   │   ├── models.rs       # Guild, User, Session, VoiceTranscript models
+│   │   └── queries.rs      # Database queries and migrations
 │   └── translation/        # Translation client
 │       ├── mod.rs          # TranslationClient
 │       └── cache.rs        # LRU translation cache
 ├── inference/              # Python inference sidecar
-│   ├── main.py             # FastAPI server
+│   ├── main.py             # FastAPI server (text translation)
 │   ├── translator.py       # TranslateGemma wrapper
 │   ├── detector.py         # Language detection
+│   ├── voice_service.py    # WebSocket server (voice translation)
+│   ├── voice/              # Voice processing modules
+│   │   ├── stt.py          # Distil-Whisper speech-to-text
+│   │   └── tts.py          # CosyVoice/edge-tts text-to-speech
 │   └── requirements.txt    # Python dependencies
 ├── docker/
 │   ├── docker-compose.yml  # Multi-container deployment
 │   ├── Dockerfile.rust     # Bot container
-│   └── Dockerfile.inference # Inference container
+│   ├── Dockerfile.inference # Text inference container
+│   └── Dockerfile.voice    # Voice inference container
 ├── config/
 │   └── default.toml        # Default configuration
 └── static/                 # Web frontend assets
@@ -624,15 +840,19 @@ linguabridge/
 
 1. **Python sidecar for inference**: Candle (Rust ML) doesn't support Gemma 3 architecture yet. Python sidecar uses transformers library.
 
-2. **Secure admin transport**: Environment variables expose secrets on decentralized platforms (Akash). Cryptographic provisioning solves this:
+2. **Separate voice inference service**: Voice processing requires additional models (Whisper, CosyVoice) that benefit from dedicated GPU memory management. WebSocket streaming enables low-latency audio processing.
+
+3. **Secure admin transport**: Environment variables expose secrets on decentralized platforms (Akash). Cryptographic provisioning solves this:
    - Ed25519 for admin authentication
    - X25519 for ephemeral key exchange
    - ChaCha20-Poly1305 for payload encryption
    - zeroize for secure memory cleanup
 
-3. **Memory-only secrets**: SecretsPayload uses manual Drop impl to zeroize all fields. Never persisted to disk.
+4. **Memory-only secrets**: SecretsPayload uses manual Drop impl to zeroize all fields. Never persisted to disk.
 
-4. **Boot sequence**: main.rs waits for provisioning before starting Discord bot:
+5. **Songbird for voice**: The bot uses Songbird (serenity voice integration) for receiving Discord voice audio. Energy-based VAD segments speech into utterances before sending to inference.
+
+6. **Boot sequence**: main.rs waits for provisioning before starting Discord bot:
 
    ```rust
    // 1. Load config (no secrets)
@@ -646,7 +866,10 @@ linguabridge/
 - **Adding new bot commands**: `src/bot/commands/mod.rs` + new command file
 - **Adding new secrets**: Update `SecretsPayload` in both `src/admin/secrets.rs` and `admin-cli/src/main.rs`
 - **Changing config**: `src/config.rs` and `config/default.toml`
-- **Database schema**: `src/db/` with sqlx migrations
+- **Database schema**: `src/db/models.rs` for types, `src/db/queries.rs` for migrations + repos
+- **Voice web view UI**: `src/web/voice_routes.rs` contains the HTML template
+- **Voice result handling**: `src/voice/bridge.rs` routes results to web clients + Discord threads
+- **Discord thread transcripts**: `src/bot/commands/voice.rs` (transcript command) + `src/db/queries.rs` (VoiceTranscriptRepo)
 
 ### Crypto Implementation Details
 
@@ -681,25 +904,37 @@ build_signature_message() // Canonical message format for signing
 Key crates:
 
 - `serenity` / `poise` - Discord bot framework
+- `songbird` - Discord voice reception
 - `axum` - Web server
 - `sqlx` - Async database
+- `tokio-tungstenite` - WebSocket client
 - `ed25519-dalek` - Ed25519 signatures
 - `x25519-dalek` - X25519 key exchange
 - `chacha20poly1305` - AEAD encryption
 - `zeroize` - Secure memory cleanup
+
+Key Python packages (voice):
+
+- `faster-whisper` - Distil-Whisper STT
+- `cosyvoice` - CosyVoice TTS (optional)
+- `edge-tts` - Microsoft Edge TTS (fallback)
+- `pyannote.audio` - Speaker diarization (optional)
 
 ### Common Tasks
 
 **Run the full stack locally:**
 
 ```bash
-# Terminal 1: Inference
+# Terminal 1: Text Inference
 cd inference && python main.py
 
-# Terminal 2: Bot
+# Terminal 2: Voice Inference
+cd inference && python voice_service.py
+
+# Terminal 3: Bot
 cargo run
 
-# Terminal 3: Provision
+# Terminal 4: Provision
 cargo run -p admin-cli -- provision --bot-url http://localhost:9999 --discord-token $TOKEN --admin-key admin.key
 ```
 
@@ -715,4 +950,27 @@ curl http://localhost:9999/status
 ```bash
 curl http://localhost:9999/pubkey
 # {"public_key":"base64..."}
+```
+
+**Check voice inference service:**
+
+```bash
+curl http://localhost:8001/health
+# {"status":"ok","stt_loaded":true,"tts_loaded":true,...}
+```
+
+**Test voice web view locally:**
+
+```bash
+# Open in browser (replace with actual guild/channel IDs)
+open http://localhost:3000/voice/123456789/987654321
+
+# Or test WebSocket connection directly
+websocat ws://localhost:3000/voice/123456789/987654321/ws
+```
+
+**Check voice transcript settings in database:**
+
+```bash
+sqlite3 linguabridge.db "SELECT * FROM voice_transcript_settings;"
 ```

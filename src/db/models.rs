@@ -167,3 +167,62 @@ impl NewWebSession {
         Uuid::new_v4().to_string()
     }
 }
+
+/// Voice channel translation settings
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct VoiceChannelSettings {
+    pub id: i64,
+    pub guild_id: String,
+    pub voice_channel_id: String,
+    pub enabled: bool,
+    pub target_language: String,
+    pub enable_tts: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// New voice channel settings
+#[derive(Debug, Clone)]
+pub struct NewVoiceChannelSettings {
+    pub guild_id: String,
+    pub voice_channel_id: String,
+    pub target_language: String,
+    pub enable_tts: bool,
+}
+
+/// Voice transcript settings - for posting transcripts to Discord threads
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct VoiceTranscriptSettings {
+    pub id: i64,
+    pub guild_id: String,
+    pub voice_channel_id: String,
+    pub text_channel_id: String,
+    pub enabled: bool,
+    /// JSON array of language codes, e.g., ["en", "es", "fr"]
+    pub languages: String,
+    /// JSON map of language code to thread ID, e.g., {"en": "123456", "es": "789012"}
+    pub thread_ids: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// New voice transcript settings
+#[derive(Debug, Clone)]
+pub struct NewVoiceTranscriptSettings {
+    pub guild_id: String,
+    pub voice_channel_id: String,
+    pub text_channel_id: String,
+    pub languages: Vec<String>,
+}
+
+impl VoiceTranscriptSettings {
+    /// Get languages as Vec
+    pub fn get_languages(&self) -> Vec<String> {
+        serde_json::from_str(&self.languages).unwrap_or_default()
+    }
+
+    /// Get thread IDs as HashMap
+    pub fn get_thread_ids(&self) -> std::collections::HashMap<String, String> {
+        serde_json::from_str(&self.thread_ids).unwrap_or_default()
+    }
+}

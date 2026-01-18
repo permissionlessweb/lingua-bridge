@@ -33,6 +33,44 @@ services:
     networks:
       - linguabridge
 
+  # Voice inference service (STT, TTS, WebSocket)
+  voice-inference:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.voice
+    container_name: linguabridge-voice
+    restart: unless-stopped
+    environment:
+      - DEVICE=cuda
+      - TORCH_DTYPE=bfloat16
+      - STT_MODEL=${STT_MODEL:-distil-large-v3}
+      - TTS_MODEL=${TTS_MODEL:-CosyVoice2-0.5B}
+      - ENABLE_TTS=${ENABLE_TTS:-true}
+      - ENABLE_DIARIZATION=${ENABLE_DIARIZATION:-false}
+      - TRANSLATEGEMMA_MODEL=${TRANSLATEGEMMA_MODEL:-google/translategemma-4b-it}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HOST=0.0.0.0
+      - PORT=8001
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - whisper-cache:/root/.cache/whisper
+      - linguabridge-cache:/root/.cache/linguabridge
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 180s
+    networks:
+      - linguabridge
+
   # LinguaBridge bot and web server
   bot:
     build:
@@ -43,6 +81,8 @@ services:
     depends_on:
       inference:
         condition: service_healthy
+      voice-inference:
+        condition: service_healthy
     environment:
       # IMPORTANT: Discord token is NOT set here.
       # It is securely provisioned at runtime via admin CLI.
@@ -51,6 +91,9 @@ services:
       - LINGUABRIDGE_ADMIN__PORT=9999
       - LINGUABRIDGE_ADMIN__HOST=0.0.0.0
       - LINGUABRIDGE_INFERENCE__URL=http://inference:8000
+      - LINGUABRIDGE_VOICE__URL=ws://voice-inference:8001/voice
+      - LINGUABRIDGE_VOICE__ENABLE_TTS_PLAYBACK=${ENABLE_TTS_PLAYBACK:-false}
+      - LINGUABRIDGE_VOICE__DEFAULT_TARGET_LANGUAGE=${DEFAULT_TARGET_LANGUAGE:-en}
       - LINGUABRIDGE_WEB__HOST=0.0.0.0
       - LINGUABRIDGE_WEB__PORT=3000
       - LINGUABRIDGE_WEB__PUBLIC_URL=${PUBLIC_URL:-http://localhost:3000}
@@ -78,5 +121,6 @@ networks:
 
 volumes:
   huggingface-cache:
+  whisper-cache:
   linguabridge-cache:
   bot-data:

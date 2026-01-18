@@ -2,7 +2,7 @@ use crate::db::models::*;
 use crate::error::{AppError, AppResult};
 use chrono::{Duration, Utc};
 use sqlx::{Pool, Sqlite};
-use tracing::{debug, info};
+use tracing::info;
 
 pub type DbPool = Pool<Sqlite>;
 
@@ -12,12 +12,10 @@ pub struct GuildRepo;
 impl GuildRepo {
     /// Get guild by Discord guild ID
     pub async fn get_by_guild_id(pool: &DbPool, guild_id: &str) -> AppResult<Option<Guild>> {
-        let guild = sqlx::query_as::<_, Guild>(
-            "SELECT * FROM guilds WHERE guild_id = ?",
-        )
-        .bind(guild_id)
-        .fetch_optional(pool)
-        .await?;
+        let guild = sqlx::query_as::<_, Guild>("SELECT * FROM guilds WHERE guild_id = ?")
+            .bind(guild_id)
+            .fetch_optional(pool)
+            .await?;
 
         Ok(guild)
     }
@@ -88,11 +86,7 @@ impl GuildRepo {
     }
 
     /// Enable a channel for translation
-    pub async fn enable_channel(
-        pool: &DbPool,
-        guild_id: &str,
-        channel_id: &str,
-    ) -> AppResult<()> {
+    pub async fn enable_channel(pool: &DbPool, guild_id: &str, channel_id: &str) -> AppResult<()> {
         let guild = Self::get_by_guild_id(pool, guild_id)
             .await?
             .ok_or(AppError::GuildNotConfigured)?;
@@ -116,11 +110,7 @@ impl GuildRepo {
     }
 
     /// Disable a channel for translation
-    pub async fn disable_channel(
-        pool: &DbPool,
-        guild_id: &str,
-        channel_id: &str,
-    ) -> AppResult<()> {
+    pub async fn disable_channel(pool: &DbPool, guild_id: &str, channel_id: &str) -> AppResult<()> {
         let guild = Self::get_by_guild_id(pool, guild_id)
             .await?
             .ok_or(AppError::GuildNotConfigured)?;
@@ -235,7 +225,11 @@ pub struct WebSessionRepo;
 
 impl WebSessionRepo {
     /// Create a new web session
-    pub async fn create(pool: &DbPool, session: NewWebSession, expiry_hours: u64) -> AppResult<WebSession> {
+    pub async fn create(
+        pool: &DbPool,
+        session: NewWebSession,
+        expiry_hours: u64,
+    ) -> AppResult<WebSession> {
         let session_id = NewWebSession::generate_session_id();
         let now = Utc::now();
         let expires_at = now + Duration::hours(expiry_hours as i64);
@@ -261,7 +255,10 @@ impl WebSessionRepo {
     }
 
     /// Get session by ID
-    pub async fn get_by_session_id(pool: &DbPool, session_id: &str) -> AppResult<Option<WebSession>> {
+    pub async fn get_by_session_id(
+        pool: &DbPool,
+        session_id: &str,
+    ) -> AppResult<Option<WebSession>> {
         let session = sqlx::query_as::<_, WebSession>(
             "SELECT * FROM web_sessions WHERE session_id = ? AND expires_at > ?",
         )
@@ -290,6 +287,276 @@ impl WebSessionRepo {
             .execute(pool)
             .await?;
 
+        Ok(())
+    }
+}
+
+/// Database operations for voice channel settings
+pub struct VoiceChannelRepo;
+
+impl VoiceChannelRepo {
+    /// Get settings for a voice channel
+    pub async fn get_settings(
+        pool: &DbPool,
+        guild_id: &str,
+        voice_channel_id: &str,
+    ) -> AppResult<Option<VoiceChannelSettings>> {
+        let settings = sqlx::query_as::<_, VoiceChannelSettings>(
+            "SELECT * FROM voice_channel_settings WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(settings)
+    }
+
+    /// Get all voice channel settings for a guild
+    pub async fn get_by_guild(
+        pool: &DbPool,
+        guild_id: &str,
+    ) -> AppResult<Vec<VoiceChannelSettings>> {
+        let settings = sqlx::query_as::<_, VoiceChannelSettings>(
+            "SELECT * FROM voice_channel_settings WHERE guild_id = ?",
+        )
+        .bind(guild_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(settings)
+    }
+
+    /// Create or update voice channel settings
+    pub async fn upsert(
+        pool: &DbPool,
+        settings: NewVoiceChannelSettings,
+    ) -> AppResult<VoiceChannelSettings> {
+        let now = Utc::now();
+
+        sqlx::query(
+            r#"
+            INSERT INTO voice_channel_settings (guild_id, voice_channel_id, enabled, target_language, enable_tts, created_at, updated_at)
+            VALUES (?, ?, true, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, voice_channel_id) DO UPDATE SET
+                target_language = excluded.target_language,
+                enable_tts = excluded.enable_tts,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&settings.guild_id)
+        .bind(&settings.voice_channel_id)
+        .bind(&settings.target_language)
+        .bind(settings.enable_tts)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await?;
+
+        Self::get_settings(pool, &settings.guild_id, &settings.voice_channel_id)
+            .await?
+            .ok_or_else(|| AppError::internal("Failed to retrieve created voice settings"))
+    }
+
+    /// Enable/disable voice translation for a channel
+    pub async fn set_enabled(
+        pool: &DbPool,
+        guild_id: &str,
+        voice_channel_id: &str,
+        enabled: bool,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE voice_channel_settings SET enabled = ?, updated_at = ? WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(enabled)
+        .bind(Utc::now())
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update target language for a voice channel
+    pub async fn set_target_language(
+        pool: &DbPool,
+        guild_id: &str,
+        voice_channel_id: &str,
+        language: &str,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE voice_channel_settings SET target_language = ?, updated_at = ? WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(language)
+        .bind(Utc::now())
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update TTS setting for a voice channel
+    pub async fn set_tts_enabled(
+        pool: &DbPool,
+        guild_id: &str,
+        voice_channel_id: &str,
+        enabled: bool,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE voice_channel_settings SET enable_tts = ?, updated_at = ? WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(enabled)
+        .bind(Utc::now())
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete voice channel settings
+    pub async fn delete(pool: &DbPool, guild_id: &str, voice_channel_id: &str) -> AppResult<()> {
+        sqlx::query(
+            "DELETE FROM voice_channel_settings WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+}
+
+/// Database operations for voice transcript settings
+pub struct VoiceTranscriptRepo;
+
+impl VoiceTranscriptRepo {
+    /// Get transcript settings for a voice channel
+    pub async fn get_settings(
+        pool: &DbPool,
+        guild_id: &str,
+        voice_channel_id: &str,
+    ) -> AppResult<Option<VoiceTranscriptSettings>> {
+        let settings = sqlx::query_as::<_, VoiceTranscriptSettings>(
+            "SELECT * FROM voice_transcript_settings WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(settings)
+    }
+
+    /// Get all transcript settings for a guild
+    pub async fn get_by_guild(
+        pool: &DbPool,
+        guild_id: &str,
+    ) -> AppResult<Vec<VoiceTranscriptSettings>> {
+        let settings = sqlx::query_as::<_, VoiceTranscriptSettings>(
+            "SELECT * FROM voice_transcript_settings WHERE guild_id = ? AND enabled = true",
+        )
+        .bind(guild_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(settings)
+    }
+
+    /// Create or update transcript settings
+    pub async fn upsert(
+        pool: &DbPool,
+        settings: NewVoiceTranscriptSettings,
+    ) -> AppResult<VoiceTranscriptSettings> {
+        let now = Utc::now();
+        let languages_json = serde_json::to_string(&settings.languages).unwrap();
+        let empty_threads =
+            serde_json::to_string(&std::collections::HashMap::<String, String>::new()).unwrap();
+
+        sqlx::query(
+            r#"
+            INSERT INTO voice_transcript_settings (guild_id, voice_channel_id, text_channel_id, enabled, languages, thread_ids, created_at, updated_at)
+            VALUES (?, ?, ?, true, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, voice_channel_id) DO UPDATE SET
+                text_channel_id = excluded.text_channel_id,
+                enabled = true,
+                languages = excluded.languages,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&settings.guild_id)
+        .bind(&settings.voice_channel_id)
+        .bind(&settings.text_channel_id)
+        .bind(&languages_json)
+        .bind(&empty_threads)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await?;
+
+        Self::get_settings(pool, &settings.guild_id, &settings.voice_channel_id)
+            .await?
+            .ok_or_else(|| AppError::internal("Failed to retrieve created transcript settings"))
+    }
+
+    /// Enable/disable transcripts for a voice channel
+    pub async fn set_enabled(
+        pool: &DbPool,
+        guild_id: &str,
+        voice_channel_id: &str,
+        enabled: bool,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE voice_transcript_settings SET enabled = ?, updated_at = ? WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(enabled)
+        .bind(Utc::now())
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update thread ID for a language
+    pub async fn set_thread_id(
+        pool: &DbPool,
+        guild_id: &str,
+        voice_channel_id: &str,
+        language: &str,
+        thread_id: &str,
+    ) -> AppResult<()> {
+        // Get current settings
+        let settings = Self::get_settings(pool, guild_id, voice_channel_id)
+            .await?
+            .ok_or_else(|| AppError::internal("Transcript settings not found"))?;
+
+        let mut thread_ids = settings.get_thread_ids();
+        thread_ids.insert(language.to_string(), thread_id.to_string());
+        let thread_ids_json = serde_json::to_string(&thread_ids).unwrap();
+
+        sqlx::query(
+            "UPDATE voice_transcript_settings SET thread_ids = ?, updated_at = ? WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(thread_ids_json)
+        .bind(Utc::now())
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete transcript settings
+    pub async fn delete(pool: &DbPool, guild_id: &str, voice_channel_id: &str) -> AppResult<()> {
+        sqlx::query(
+            "DELETE FROM voice_transcript_settings WHERE guild_id = ? AND voice_channel_id = ?",
+        )
+        .bind(guild_id)
+        .bind(voice_channel_id)
+        .execute(pool)
+        .await?;
         Ok(())
     }
 }
@@ -366,6 +633,43 @@ pub async fn init_db(pool: &DbPool) -> AppResult<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS voice_channel_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            voice_channel_id TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT true,
+            target_language TEXT NOT NULL DEFAULT 'en',
+            enable_tts BOOLEAN NOT NULL DEFAULT false,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE(guild_id, voice_channel_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS voice_transcript_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            voice_channel_id TEXT NOT NULL,
+            text_channel_id TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT true,
+            languages TEXT NOT NULL DEFAULT '["en"]',
+            thread_ids TEXT NOT NULL DEFAULT '{}',
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE(guild_id, voice_channel_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     // Create indexes
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_guilds_guild_id ON guilds(guild_id)")
         .execute(pool)
@@ -374,6 +678,14 @@ pub async fn init_db(pool: &DbPool) -> AppResult<()> {
         .execute(pool)
         .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON web_sessions(session_id)")
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_voice_settings_guild ON voice_channel_settings(guild_id)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_voice_transcript_guild ON voice_transcript_settings(guild_id)")
         .execute(pool)
         .await?;
 

@@ -5,7 +5,8 @@
 # Before deploying:
 # 1. Generate admin keys: cargo run -p admin-cli -- keygen
 # 2. Replace <YOUR_ADMIN_PUBLIC_KEY> with contents of admin.pub
-# 3. Build and push Docker images to a registry
+# 3. Build and push Docker images to GHCR
+# 4. Update GHCR credentials below (username + PAT with read:packages scope)
 #
 # After deployment:
 # 1. Note the assigned URIs from Akash
@@ -16,7 +17,11 @@ version: "2.0"
 services:
   # TranslateGemma inference service (GPU required)
   inference:
-    image: ghcr.io/yourusername/linguabridge-inference:latest
+    image: ghcr.io/permissionlessweb/linguabridge-inference:latest
+    credentials:
+      host: ghcr.io
+      username: <GHCR_USERNAME>
+      password: <GHCR_PAT>
     env:
       - DEVICE=cuda
       - TORCH_DTYPE=bfloat16
@@ -30,9 +35,37 @@ services:
         to:
           - service: bot
 
+  # Voice inference service (STT, TTS, WebSocket) - GPU required
+  voice-inference:
+    image: ghcr.io/permissionlessweb/linguabridge-voice:latest
+    credentials:
+      host: ghcr.io
+      username: <GHCR_USERNAME>
+      password: <GHCR_PAT>
+    env:
+      - DEVICE=cuda
+      - TORCH_DTYPE=bfloat16
+      - STT_MODEL=distil-large-v3
+      - TTS_MODEL=CosyVoice2-0.5B
+      - ENABLE_TTS=true
+      - ENABLE_DIARIZATION=false
+      - TRANSLATEGEMMA_MODEL=google/translategemma-4b-it
+      - HOST=0.0.0.0
+      - PORT=8001
+    expose:
+      # Internal WebSocket - bot connects to this
+      - port: 8001
+        as: 8001
+        to:
+          - service: bot
+
   # LinguaBridge Discord bot and web server
   bot:
-    image: ghcr.io/yourusername/linguabridge-bot:latest
+    image: ghcr.io/permissionlessweb/linguabridge-bot:latest
+    credentials:
+      host: ghcr.io
+      username: <GHCR_USERNAME>
+      password: <GHCR_PAT>
     depends_on:
       - service: inference
     env:
@@ -58,8 +91,6 @@ services:
         as: 80
         to:
           - global: true
-        accept:
-          - linguabridge.yourdomain.com
       # Admin provisioning endpoint - publicly accessible for remote provisioning
       # Security: Only accepts signed requests from admin key holder
       - port: 9999
@@ -92,6 +123,24 @@ profiles:
                 - model: a100
         storage:
           - size: 20Gi  # Model cache
+    voice-inference:
+      resources:
+        cpu:
+          units: 4
+        memory:
+          size: 24Gi  # Whisper + CosyVoice + TranslateGemma
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: rtx3080
+                - model: rtx3090
+                - model: rtx4080
+                - model: rtx4090
+                - model: a100
+        storage:
+          - size: 30Gi  # Model cache for STT/TTS
     bot:
       resources:
         cpu:
@@ -117,6 +166,9 @@ profiles:
         inference:
           denom: uakt
           amount: 10000
+        voice-inference:
+          denom: uakt
+          amount: 12000
         bot:
           denom: uakt
           amount: 1000
@@ -126,7 +178,30 @@ deployment:
     akash:
       profile: inference
       count: 1
+  voice-inference:
+    akash:
+      profile: voice-inference
+      count: 1
   bot:
     akash:
       profile: bot
       count: 1
+
+# =============================================================================
+# ALTERNATIVE: Public Registry (no credentials needed)
+# =============================================================================
+# If your images are public, you can remove the credentials blocks:
+#
+# services:
+#   inference:
+#     image: ghcr.io/yourusername/linguabridge-inference:latest
+#     env:
+#       - DEVICE=cuda
+#       ...
+#
+#   bot:
+#     image: ghcr.io/yourusername/linguabridge-bot:latest
+#     env:
+#       - LINGUABRIDGE_ADMIN__PUBLIC_KEY=<YOUR_ADMIN_PUBLIC_KEY>
+#       ...
+# =============================================================================

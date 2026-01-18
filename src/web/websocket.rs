@@ -1,5 +1,5 @@
 use crate::db::{DbPool, WebSessionRepo};
-use crate::web::broadcast::{BroadcastManager, WebMessage};
+use crate::web::broadcast::BroadcastManager;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -34,7 +34,10 @@ async fn handle_socket(socket: WebSocket, session_id: String, state: AppState) {
     let session = match WebSessionRepo::get_by_session_id(&state.pool, &session_id).await {
         Ok(Some(s)) => s,
         Ok(None) => {
-            warn!("Invalid session attempted: {}", &session_id[..8.min(session_id.len())]);
+            warn!(
+                "Invalid session attempted: {}",
+                &session_id[..8.min(session_id.len())]
+            );
             let (mut sender, _) = socket.split();
             let _ = sender
                 .send(Message::Text(
@@ -73,7 +76,11 @@ async fn handle_socket(socket: WebSocket, session_id: String, state: AppState) {
         "guild_id": session.guild_id,
         "channel_id": session.channel_id,
     });
-    if sender.send(Message::Text(welcome.to_string().into())).await.is_err() {
+    if sender
+        .send(Message::Text(welcome.to_string().into()))
+        .await
+        .is_err()
+    {
         return;
     }
 
@@ -112,7 +119,7 @@ async fn handle_socket(socket: WebSocket, session_id: String, state: AppState) {
                     debug!("Received from client: {}", text);
                     // Handle client messages if needed (e.g., heartbeat, language filter)
                 }
-                Ok(Message::Ping(data)) => {
+                Ok(Message::Ping(_)) => {
                     debug!("Received ping");
                 }
                 Ok(Message::Pong(_)) => {
@@ -141,5 +148,8 @@ async fn handle_socket(socket: WebSocket, session_id: String, state: AppState) {
         }
     }
 
-    info!("WebSocket disconnected: session={}", &session.session_id[..8]);
+    info!(
+        "WebSocket disconnected: session={}",
+        &session.session_id[..8]
+    );
 }

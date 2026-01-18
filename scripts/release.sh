@@ -16,6 +16,7 @@
 #   --dockerhub-owner    Override DOCKERHUB_OWNER for this run
 #   --bot-only           Only build/push the bot image
 #   --inference-only     Only build/push the inference image
+#   --voice-only         Only build/push the voice inference image
 #   --no-cache           Build without Docker cache
 #   --dry-run            Show what would be done without executing
 #   -h, --help           Show this help message
@@ -62,6 +63,7 @@ PUSH_GHCR=false
 PUSH_DOCKERHUB=false
 BUILD_BOT=true
 BUILD_INFERENCE=true
+BUILD_VOICE=true
 NO_CACHE=""
 DRY_RUN=false
 PLATFORMS="linux/amd64"
@@ -75,6 +77,7 @@ CLI_DOCKERHUB_OWNER=""
 # Image names
 BOT_IMAGE="linguabridge-bot"
 INFERENCE_IMAGE="linguabridge-inference"
+VOICE_IMAGE="linguabridge-voice"
 
 # Buildx builder name
 BUILDER_NAME="linguabridge-builder"
@@ -183,10 +186,17 @@ while [[ $# -gt 0 ]]; do
             ;;
         --bot-only)
             BUILD_INFERENCE=false
+            BUILD_VOICE=false
             shift
             ;;
         --inference-only)
             BUILD_BOT=false
+            BUILD_VOICE=false
+            shift
+            ;;
+        --voice-only)
+            BUILD_BOT=false
+            BUILD_INFERENCE=false
             shift
             ;;
         --no-cache)
@@ -261,9 +271,9 @@ if [ "$PUSH_DOCKERHUB" = true ] && [ -z "${DOCKERHUB_OWNER:-}" ]; then
 fi
 
 # Warn about CUDA arm64 limitation
-if [ "$BUILD_INFERENCE" = true ] && [[ "$PLATFORMS" == *"arm64"* ]]; then
+if { [ "$BUILD_INFERENCE" = true ] || [ "$BUILD_VOICE" = true ]; } && [[ "$PLATFORMS" == *"arm64"* ]]; then
     log_warn "NVIDIA CUDA images have limited arm64 support."
-    log_warn "The inference image may only build successfully for linux/amd64."
+    log_warn "The inference/voice images may only build successfully for linux/amd64."
     log_warn "Consider using --bot-only for arm64-only builds, or accept amd64-only inference."
     echo ""
 fi
@@ -285,6 +295,7 @@ log_info "Push to GHCR: $PUSH_GHCR"
 log_info "Push to Docker Hub: $PUSH_DOCKERHUB"
 log_info "Build bot: $BUILD_BOT"
 log_info "Build inference: $BUILD_INFERENCE"
+log_info "Build voice: $BUILD_VOICE"
 echo ""
 
 # Setup buildx for multi-platform or cross-platform builds
@@ -392,6 +403,16 @@ if [ "$BUILD_INFERENCE" = true ]; then
     build_and_push_image "$INFERENCE_IMAGE" "docker/Dockerfile.inference" "$INFERENCE_PLATFORMS" "${REGISTRIES[@]}"
 fi
 
+if [ "$BUILD_VOICE" = true ]; then
+    # For voice, limit to amd64 if multi-arch requested (CUDA limitation)
+    VOICE_PLATFORMS="$PLATFORMS"
+    if [[ "$PLATFORMS" == *"arm64"* ]] && [[ "$PLATFORMS" == *"amd64"* ]]; then
+        log_warn "Limiting voice build to linux/amd64 (CUDA limitation)"
+        VOICE_PLATFORMS="linux/amd64"
+    fi
+    build_and_push_image "$VOICE_IMAGE" "docker/Dockerfile.voice" "$VOICE_PLATFORMS" "${REGISTRIES[@]}"
+fi
+
 echo ""
 log_success "========================================="
 log_success "  Release complete!"
@@ -417,6 +438,20 @@ if [ "$BUILD_INFERENCE" = true ]; then
     fi
     if [ "$PUSH_DOCKERHUB" = true ]; then
         echo "  Docker Hub Inference: $DOCKERHUB_OWNER/$INFERENCE_IMAGE:$TAG"
+    fi
+    if [[ "$PLATFORMS" == *"arm64"* ]]; then
+        echo "  Platforms:            linux/amd64 (CUDA requires x86_64)"
+    else
+        echo "  Platforms:            $PLATFORMS"
+    fi
+fi
+echo ""
+if [ "$BUILD_VOICE" = true ]; then
+    if [ "$PUSH_GHCR" = true ]; then
+        echo "  GHCR Voice:           ghcr.io/$GHCR_OWNER/$VOICE_IMAGE:$TAG"
+    fi
+    if [ "$PUSH_DOCKERHUB" = true ]; then
+        echo "  Docker Hub Voice:     $DOCKERHUB_OWNER/$VOICE_IMAGE:$TAG"
     fi
     if [[ "$PLATFORMS" == *"arm64"* ]]; then
         echo "  Platforms:            linux/amd64 (CUDA requires x86_64)"

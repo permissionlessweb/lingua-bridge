@@ -77,6 +77,54 @@ pub struct RateLimitsConfig {
     pub paid_messages_per_minute: u32,
 }
 
+/// Voice translation settings
+#[derive(Debug, Deserialize, Clone)]
+pub struct VoiceConfig {
+    /// WebSocket URL for voice inference service
+    #[serde(default = "default_voice_url")]
+    pub url: String,
+    /// Enable TTS playback in Discord
+    #[serde(default)]
+    pub enable_tts_playback: bool,
+    /// Audio buffer size in milliseconds
+    #[serde(default = "default_buffer_ms")]
+    pub buffer_ms: u32,
+    /// VAD sensitivity threshold (0.0-1.0)
+    #[serde(default = "default_vad_threshold")]
+    pub vad_threshold: f32,
+    /// Default target language for voice translations
+    #[serde(default = "default_voice_target_lang")]
+    pub default_target_language: String,
+}
+
+fn default_voice_url() -> String {
+    "ws://voice-inference:8001/voice".to_string()
+}
+
+fn default_buffer_ms() -> u32 {
+    500
+}
+
+fn default_vad_threshold() -> f32 {
+    0.5
+}
+
+fn default_voice_target_lang() -> String {
+    "en".to_string()
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            url: default_voice_url(),
+            enable_tts_playback: false,
+            buffer_ms: default_buffer_ms(),
+            vad_threshold: default_vad_threshold(),
+            default_target_language: default_voice_target_lang(),
+        }
+    }
+}
+
 /// Root application configuration
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
@@ -90,6 +138,9 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub translation: TranslationConfig,
     pub rate_limits: RateLimitsConfig,
+    /// Voice translation configuration
+    #[serde(default)]
+    pub voice: VoiceConfig,
 }
 
 impl Default for DiscordConfig {

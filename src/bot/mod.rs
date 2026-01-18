@@ -4,9 +4,12 @@ pub mod handler;
 use crate::config::AppConfig;
 use crate::db::DbPool;
 use crate::translation::TranslationClient;
+use crate::voice::{spawn_voice_bridge, VoiceClientConfig, VoiceManager};
 use crate::web::broadcast::BroadcastManager;
 use poise::serenity_prelude::{self as serenity, FullEvent, GatewayIntents};
+use songbird::SerenityInit;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info};
 
 /// Shared data accessible in all commands
@@ -15,6 +18,7 @@ pub struct Data {
     pub pool: DbPool,
     pub translator: Arc<TranslationClient>,
     pub broadcast: Arc<BroadcastManager>,
+    pub voice: Option<Arc<VoiceManager>>,
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -59,13 +63,9 @@ pub async fn create_framework(
     pool: DbPool,
     translator: Arc<TranslationClient>,
     broadcast: Arc<BroadcastManager>,
+    voice: Option<Arc<VoiceManager>>,
 ) -> Result<poise::Framework<Data, Error>, Error> {
-    let config = AppConfig::get();
-
-    let intents = GatewayIntents::GUILDS
-        | GatewayIntents::GUILD_MESSAGES
-        | GatewayIntents::MESSAGE_CONTENT
-        | GatewayIntents::GUILD_MEMBERS;
+    let _config = AppConfig::get();
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
@@ -103,6 +103,7 @@ pub async fn create_framework(
                     pool,
                     translator,
                     broadcast,
+                    voice,
                 })
             })
         })
@@ -124,18 +125,42 @@ pub async fn start_bot_with_token(
         return Err("Discord token is empty".into());
     }
 
+    let config = AppConfig::get();
+
     let intents = GatewayIntents::GUILDS
         | GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT
-        | GatewayIntents::GUILD_MEMBERS;
+        | GatewayIntents::GUILD_MEMBERS
+        | GatewayIntents::GUILD_VOICE_STATES;
 
-    let framework = create_framework(pool, translator, broadcast).await?;
+    // Create Songbird voice manager
+    let songbird = songbird::Songbird::serenity();
+
+    // Create voice client config from app config
+    let voice_client_config = VoiceClientConfig {
+        url: config.voice.url.clone(),
+        reconnect_delay: Duration::from_secs(2),
+        max_reconnect_attempts: 10,
+        request_timeout: Duration::from_secs(30),
+        ping_interval: Duration::from_secs(30),
+    };
+
+    // Create voice manager
+    let voice_manager = Arc::new(VoiceManager::new(songbird.clone(), voice_client_config));
+
+    // Spawn voice bridge to forward results to web clients
+    let voice_rx = voice_manager.subscribe_results();
+    let _bridge_handle = spawn_voice_bridge(voice_rx, broadcast.clone());
+    info!("Voice bridge started - forwarding transcriptions to web clients");
+
+    let framework = create_framework(pool, translator, broadcast, Some(voice_manager)).await?;
 
     let mut client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
+        .register_songbird_with(songbird.clone())
         .await?;
 
-    info!("Starting Discord bot...");
+    info!("Starting Discord bot with voice support...");
     client.start().await?;
 
     Ok(())

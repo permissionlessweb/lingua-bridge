@@ -14,7 +14,6 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 use thiserror::Error;
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
-use zeroize::Zeroize;
 
 /// Cryptographic errors
 #[derive(Debug, Error)]
