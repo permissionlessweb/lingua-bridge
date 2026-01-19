@@ -18,6 +18,7 @@
 #   --inference-only     Only build/push the inference image
 #   --voice-only         Only build/push the voice inference image
 #   --no-cache           Build without Docker cache
+#   --push-only          Skip build, push existing local images only
 #   --dry-run            Show what would be done without executing
 #   -h, --help           Show this help message
 #
@@ -65,6 +66,7 @@ BUILD_BOT=true
 BUILD_INFERENCE=true
 BUILD_VOICE=true
 NO_CACHE=""
+PUSH_ONLY=false
 DRY_RUN=false
 PLATFORMS="linux/amd64"
 USE_NATIVE=false
@@ -203,6 +205,10 @@ while [[ $# -gt 0 ]]; do
             NO_CACHE="--no-cache"
             shift
             ;;
+        --push-only)
+            PUSH_ONLY=true
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -296,11 +302,12 @@ log_info "Push to Docker Hub: $PUSH_DOCKERHUB"
 log_info "Build bot: $BUILD_BOT"
 log_info "Build inference: $BUILD_INFERENCE"
 log_info "Build voice: $BUILD_VOICE"
+log_info "Push only (skip build): $PUSH_ONLY"
 echo ""
 
-# Setup buildx for multi-platform or cross-platform builds
+# Setup buildx for multi-platform or cross-platform builds (skip if push-only)
 NATIVE_ARCH=$(detect_native_arch)
-if needs_multiplatform || [ "$PLATFORMS" != "$NATIVE_ARCH" ]; then
+if [ "$PUSH_ONLY" = false ] && { needs_multiplatform || [ "$PLATFORMS" != "$NATIVE_ARCH" ]; }; then
     setup_buildx
 fi
 
@@ -355,6 +362,33 @@ build_and_push_image() {
     log_success "Built and pushed $name"
 }
 
+# Push existing local images (for --push-only mode)
+push_existing_image() {
+    local name=$1
+    shift
+    local registries=("$@")
+
+    local local_tag="$name:$TAG"
+
+    # Verify image exists locally
+    if ! docker image inspect "$local_tag" &>/dev/null; then
+        log_error "Image $local_tag not found locally. Build it first or remove --push-only."
+        exit 1
+    fi
+
+    log_info "Pushing existing image $local_tag..."
+
+    for registry in "${registries[@]}"; do
+        log_info "Pushing to $registry..."
+        run_cmd docker tag "$local_tag" "$registry/$name:$TAG"
+        run_cmd docker tag "$name:latest" "$registry/$name:latest"
+        run_cmd docker push "$registry/$name:$TAG"
+        run_cmd docker push "$registry/$name:latest"
+    done
+
+    log_success "Pushed $name"
+}
+
 # Login to registries
 if [ "$PUSH_GHCR" = true ] && [ "$DRY_RUN" = false ]; then
     log_info "Logging in to GitHub Container Registry..."
@@ -388,29 +422,41 @@ if [ "$PUSH_DOCKERHUB" = true ]; then
     REGISTRIES+=("$DOCKERHUB_OWNER")
 fi
 
-# Build images
+# Build or push images
 if [ "$BUILD_BOT" = true ]; then
-    build_and_push_image "$BOT_IMAGE" "docker/Dockerfile.rust" "$PLATFORMS" "${REGISTRIES[@]}"
+    if [ "$PUSH_ONLY" = true ]; then
+        push_existing_image "$BOT_IMAGE" "${REGISTRIES[@]}"
+    else
+        build_and_push_image "$BOT_IMAGE" "docker/Dockerfile.rust" "$PLATFORMS" "${REGISTRIES[@]}"
+    fi
 fi
 
 if [ "$BUILD_INFERENCE" = true ]; then
-    # For inference, limit to amd64 if multi-arch requested (CUDA limitation)
-    INFERENCE_PLATFORMS="$PLATFORMS"
-    if [[ "$PLATFORMS" == *"arm64"* ]] && [[ "$PLATFORMS" == *"amd64"* ]]; then
-        log_warn "Limiting inference build to linux/amd64 (CUDA limitation)"
-        INFERENCE_PLATFORMS="linux/amd64"
+    if [ "$PUSH_ONLY" = true ]; then
+        push_existing_image "$INFERENCE_IMAGE" "${REGISTRIES[@]}"
+    else
+        # For inference, limit to amd64 if multi-arch requested (CUDA limitation)
+        INFERENCE_PLATFORMS="$PLATFORMS"
+        if [[ "$PLATFORMS" == *"arm64"* ]] && [[ "$PLATFORMS" == *"amd64"* ]]; then
+            log_warn "Limiting inference build to linux/amd64 (CUDA limitation)"
+            INFERENCE_PLATFORMS="linux/amd64"
+        fi
+        build_and_push_image "$INFERENCE_IMAGE" "docker/Dockerfile.inference" "$INFERENCE_PLATFORMS" "${REGISTRIES[@]}"
     fi
-    build_and_push_image "$INFERENCE_IMAGE" "docker/Dockerfile.inference" "$INFERENCE_PLATFORMS" "${REGISTRIES[@]}"
 fi
 
 if [ "$BUILD_VOICE" = true ]; then
-    # For voice, limit to amd64 if multi-arch requested (CUDA limitation)
-    VOICE_PLATFORMS="$PLATFORMS"
-    if [[ "$PLATFORMS" == *"arm64"* ]] && [[ "$PLATFORMS" == *"amd64"* ]]; then
-        log_warn "Limiting voice build to linux/amd64 (CUDA limitation)"
-        VOICE_PLATFORMS="linux/amd64"
+    if [ "$PUSH_ONLY" = true ]; then
+        push_existing_image "$VOICE_IMAGE" "${REGISTRIES[@]}"
+    else
+        # For voice, limit to amd64 if multi-arch requested (CUDA limitation)
+        VOICE_PLATFORMS="$PLATFORMS"
+        if [[ "$PLATFORMS" == *"arm64"* ]] && [[ "$PLATFORMS" == *"amd64"* ]]; then
+            log_warn "Limiting voice build to linux/amd64 (CUDA limitation)"
+            VOICE_PLATFORMS="linux/amd64"
+        fi
+        build_and_push_image "$VOICE_IMAGE" "docker/Dockerfile.voice" "$VOICE_PLATFORMS" "${REGISTRIES[@]}"
     fi
-    build_and_push_image "$VOICE_IMAGE" "docker/Dockerfile.voice" "$VOICE_PLATFORMS" "${REGISTRIES[@]}"
 fi
 
 echo ""

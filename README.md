@@ -344,6 +344,9 @@ export DOCKERHUB_OWNER="your-org-or-username"
 
 # Preview what would happen (dry run)
 ./scripts/release.sh --tag v1.0.0 --all --dry-run
+
+# Push pre-built images without rebuilding (useful if build succeeded but push failed)
+./scripts/release.sh --tag v1.0.0 --push-only --ghcr
 ```
 
 **Note:** When pushing to an organization, you authenticate with your personal credentials, but the images are pushed to the organization's namespace. Ensure you have write access to the organization's packages.
