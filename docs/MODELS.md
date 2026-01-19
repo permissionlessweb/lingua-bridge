@@ -59,3 +59,40 @@ Similarly, here is a comprehensive list of notable open source STT (also known a
 | Flashlight ASR (formerly Wav2Letter++) | Meta | Fast, end-to-end, research-focused | MIT |
 | Julius | Community | Large vocabulary continuous speech recognition | BSD |
 | PaddleSpeech (formerly DeepSpeech2) | Baidu | Toolkit for STT and TTS, multilingual | Apache 2.0 |
+
+| Model Name | Creator/Organization | Parameters | Key Languages/Features | Notes |
+| ------------ | ------------------------- | -------------- | --------- |--------- |
+| **Dedicated MT Models** | | | | |
+| NLLB-200-3.3B | Meta (Facebook) | 3.3B | 200+ languages, including low-resource ones like African and Asian dialects | No Language Left Behind; state-of-the-art for multilingual translation; distilled versions available for efficiency.  |
+| NLLB-200-distilled-600M | Meta (Facebook) / Xenova | 600M | 200+ languages | Lightweight distilled version of NLLB-200; optimized for on-device use. |
+| SeamlessM4T | Meta | Varies (up to 7B) | 100+ languages for text-to-text, speech-to-text, etc. | Multimodal (text + speech); supports seamless translation across modalities. |
+| M2M-100 | Meta (Facebook) | 12B / 1.2B distilled | 100 languages | Many-to-Many Multilingual Translation; direct any-to-any without English pivot. |
+| OPUS-MT (various, e.g., opus-mt-ru-en, opus-mt-en-ru, opus-mt-tc-big-en-tr) | Helsinki-NLP (University of Helsinki) | ~300M-600M per model | Bilingual pairs (e.g., Russian-English, English-Turkish); covers 100+ languages across models | Large collection of bilingual models trained on OPUS dataset; highly specialized. |
+| HY-MT1.5-1.8B / HY-MT1.5-7B / Hunyuan-MT-7B / Hunyuan-MT-Chimera-7B | Tencent | 1.8B-7B | 100+ languages, strong in Chinese-English and multilingual | High-quality MT from Tencent; includes GGUF/FP8 quantized versions for efficiency. |
+| Plamo-2-Translate | PFNet | 10B | Multilingual, focused on Japanese-English and others | Specialized for accurate translation in Asian languages. |
+| Sarvam-Translate | Sarvam AI | 4B | Indian languages + English (e.g., Hindi, Tamil) | Optimized for Indic languages; supports low-resource dialects. |
+| SauerkrautLM-Translator-LFM2.5-1.2B | VAGOsolutions | 1.2B | Multilingual, German-focused but broad | Fine-tuned for high-fidelity translation; lightweight. |
+| MT5-Sinhalese-English | Thilina | Varies | Sinhalese-English bilingual | Based on mT5; specialized for Sinhala language. |
+| XCOMET-XL | Unbabel | Varies | Multilingual evaluation and translation | Focuses on quality estimation alongside translation. |
+| Hibiki-1B | Kyutai | 1B | Japanese + multilingual | Strong in Japanese translation; PyTorch-based. |
+| Masrawy-English-to-Egyptian-Arabic-Translator-v2.9 | NAMAA-Space | 200M | English to Egyptian Arabic | Dialect-specific; useful for regional Arabic variants. |
+| **Multilingual LLMs for Translation** | | | | |
+| Llama 3.1-8B-Instruct / Llama 3.1-70B-Instruct | Meta | 8B-70B | 100+ languages via prompting | Excellent for translation; supports low-resource languages better than predecessors.  |
+| Qwen2.5-72B-Instruct / Qwen3-235B-A22B | Alibaba | 72B-235B | 100+ languages, strong in Chinese and multilingual | Top performer in translation benchmarks; handles complex queries.  |
+| Mistral-Nemo-Instruct-2407 / Mixtral-8x22B-Instruct-v0.1 | Mistral AI | 12B-8x22B | 100+ languages | Fast and efficient; great for European languages and code-switching.  |
+| Phi-3.5-mini-instruct | Microsoft | 3.8B | Multilingual via prompting | Lightweight and accurate; open under MIT license. |
+| DeepSeek-V2.5 | DeepSeek | 236B | Strong in Chinese-English and broad multilingual | Cost-effective for large-scale translation. |
+| Yi-1.5-34B-Chat | 01.AI | 34B | Multilingual, Chinese-focused | High performance in Asian languages. |
+| Command R+ | Cohere | 104B | 100+ languages | Optimized for long-context translation and RAG.  |
+| Falcon 2 | Technology Innovation Institute | 11B-180B | Multilingual | Strong in Arabic and Middle Eastern languages.  |
+| BLOOM | BigScience (Hugging Face) | 176B | 46 languages natively | Early large multilingual model; good for research.  |
+| StepFun Step3 | StepFun | Varies | Multilingual | Emerging model with strong translation capabilities.  |
+| **Frameworks & Toolkits with Pre-trained Models** | | | | |
+| OpenNMT | SYSTRAN / Harvard NLP | Varies | Custom trainable; pre-trained models for many pairs | Neural MT framework; used in production systems. |
+| MarianMT | Marian NMT Team | Varies | Bilingual/multilingual; fast C++ implementation | High-speed translation; models available on HF. |
+| Bergamot | Mozilla | Varies | European languages primarily | Browser-integrated; local/offline translation. |
+| Apertium | Apertium Project | Rule-based | 50+ language pairs | Rule-based (not neural); lightweight for specific pairs like Romance languages. |
+| Argos Translate / LibreTranslate | Argos / LibreTranslate | Varies (uses OpenNMT) | 20+ languages offline | API/server for local translation; easy to deploy.  |
+| Moses | Moses SMT | Statistical | Legacy pairs | Older statistical MT; still useful for custom training. |
+
+For deployment, most of these are available on Hugging Face for easy fine-tuning or inference. If you need details on a specific model, setup instructions, or benchmarks for certain language pairs, let me know!
