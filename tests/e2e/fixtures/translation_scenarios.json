@@ -1,0 +1,44 @@
+{
+  "english_to_spanish": {
+    "input": "Hello, how are you?",
+    "source_lang": "en",
+    "target_lang": "es",
+    "expected": "Hola, ¿cómo estás?"
+  },
+  "spanish_to_english": {
+    "input": "¿Dónde está la biblioteca?",
+    "source_lang": "es",
+    "target_lang": "en",
+    "expected": "Where is the library?"
+  },
+  "french_to_japanese": {
+    "input": "Bonjour le monde",
+    "source_lang": "fr",
+    "target_lang": "ja",
+    "expected": "こんにちは世界"
+  },
+  "german_to_french": {
+    "input": "Wie spät ist es?",
+    "source_lang": "de",
+    "target_lang": "fr",
+    "expected": "Quelle heure est-il?"
+  },
+  "multilingual_greeting": {
+    "input": "Good morning everyone",
+    "source_lang": "en",
+    "target_lang": "zh",
+    "expected": "大家早上好"
+  },
+  "technical_term": {
+    "input": "I need to debug this code",
+    "source_lang": "en",
+    "target_lang": "de",
+    "expected": "Ich muss diesen Code debuggen"
+  },
+  "emoji_handling": {
+    "input": "I love coding! 🚀",
+    "source_lang": "en",
+    "target_lang": "es",
+    "expected": "¡Me encanta programar! 🚀"
+  }
+}

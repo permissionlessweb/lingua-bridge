@@ -1,0 +1,224 @@
+{
+  "translations": {
+    "text": {
+      "english_to_spanish": {
+        "input": "Hello, how are you?",
+        "source_lang": "en",
+        "target_lang": "es",
+        "expected": "Hola, ¿cómo estás?"
+      },
+      "spanish_to_english": {
+        "input": "¿Dónde está la biblioteca?",
+        "source_lang": "es",
+        "target_lang": "en",
+        "expected": "Where is the library?"
+      },
+      "french_to_japanese": {
+        "input": "Bonjour le monde",
+        "source_lang": "fr",
+        "target_lang": "ja",
+        "expected": "こんにちは世界"
+      },
+      "german_to_french": {
+        "input": "Wie spät ist es?",
+        "source_lang": "de",
+        "target_lang": "fr",
+        "expected": "Quelle heure est-il?"
+      },
+      "multilingual_greeting": {
+        "input": "Good morning everyone",
+        "source_lang": "en",
+        "target_lang": "zh",
+        "expected": "大家早上好"
+      },
+      "technical_term": {
+        "input": "I need to debug this code",
+        "source_lang": "en",
+        "target_lang": "de",
+        "expected": "Ich muss diesen Code debuggen"
+      },
+      "emoji_handling": {
+        "input": "I love coding! 🚀",
+        "source_lang": "en",
+        "target_lang": "es",
+        "expected": "¡Me encanta programar! 🚀"
+      }
+    },
+    "voice": {
+      "short_greeting": {
+        "transcription": "Hi there!",
+        "source_lang": "en",
+        "target_lang": "es",
+        "expected": "¡Hola!"
+      },
+      "long_message": {
+        "transcription": "Hello, this is a test message for voice translation.",
+        "source_lang": "en",
+        "target_lang": "es",
+        "expected": "Hola, este es un mensaje de prueba para la traducción de voz."
+      }
+    }
+  },
+
+  "language_detection": {
+    "english": {
+      "samples": ["Hello world", "Good morning", "How are you?"],
+      "expected_lang": "en",
+      "min_confidence": 0.90
+    },
+    "spanish": {
+      "samples": ["Hola mundo", "¿Cómo estás?", "Buenos días"],
+      "expected_lang": "es",
+      "min_confidence": 0.90
+    },
+    "french": {
+      "samples": ["Bonjour le monde", "Comment ça va?", "Merci beaucoup"],
+      "expected_lang": "fr",
+      "min_confidence": 0.90
+    },
+    "japanese": {
+      "samples": ["こんにちは", "ありがとう", "世界"],
+      "expected_lang": "ja",
+      "min_confidence": 0.95
+    },
+    "german": {
+      "samples": ["Guten Tag", "Wie geht es dir?", "Danke schön"],
+      "expected_lang": "de",
+      "min_confidence": 0.90
+    }
+  },
+
+  "voice": {
+    "audio_samples": {
+      "hello_short": {
+        "description": "Short greeting",
+        "duration_ms": 500,
+        "expected_transcription": "Hi there!"
+      },
+      "hello_long": {
+        "description": "Longer test message",
+        "duration_ms": 2000,
+        "expected_transcription": "Hello, this is a test message for voice translation."
+      },
+      "multilingual": {
+        "description": "Mixed language audio",
+        "duration_ms": 3000,
+        "expected_transcription": "Hello, comment ça va?"
+      }
+    },
+    "tts_outputs": {
+      "spanish_greeting": {
+        "text": "Hola, ¿cómo estás?",
+        "lang": "es",
+        "expected_duration_ms_range": [800, 1500]
+      },
+      "japanese_greeting": {
+        "text": "こんにちは世界",
+        "lang": "ja",
+        "expected_duration_ms_range": [600, 1200]
+      }
+    }
+  },
+
+  "discord": {
+    "commands": {
+      "mylang": {
+        "valid_inputs": ["es", "fr", "de", "ja", "zh", "en"],
+        "invalid_inputs": ["xyz", "123", ""],
+        "clear_commands": ["clear", "reset", "none"]
+      },
+      "join": {
+        "success_response_contains": ["joined", "connected", "voice"],
+        "error_no_channel": ["not in", "join a voice", "no voice channel"]
+      },
+      "leave": {
+        "success_response_contains": ["left", "disconnected"],
+        "error_not_connected": ["not connected", "not in"]
+      }
+    },
+    "user_preferences": {
+      "test_user_1": {
+        "user_id": "123456789",
+        "preferred_lang": "es",
+        "display_name": "TestUser1"
+      },
+      "test_user_2": {
+        "user_id": "987654321",
+        "preferred_lang": "fr",
+        "display_name": "TestUser2"
+      }
+    },
+    "channels": {
+      "text_translation": {
+        "name": "test-translations",
+        "type": "text"
+      },
+      "voice": {
+        "name": "Test Voice",
+        "type": "voice"
+      },
+      "general": {
+        "name": "general",
+        "type": "text",
+        "translation_enabled": false
+      }
+    }
+  },
+
+  "web": {
+    "webview_messages": {
+      "translation_message": {
+        "type": "translation",
+        "author_name": "TestUser",
+        "original_text": "Hello world",
+        "translated_text": "Hola mundo",
+        "source_lang": "en",
+        "target_lang": "es"
+      },
+      "error_message": {
+        "type": "error",
+        "message": "Voice inference service unavailable"
+      },
+      "ping": {
+        "type": "ping"
+      },
+      "pong": {
+        "type": "pong"
+      }
+    },
+    "expected_elements": {
+      "status_connected": "Connected",
+      "status_disconnected": "Disconnected",
+      "empty_state": "Waiting for messages",
+      "page_title": "LinguaBridge - Live Translations"
+    },
+    "test_urls": {
+      "voice_webview": "/voice/{guild_id}/{channel_id}",
+      "guild_id": "123456789",
+      "channel_id": "987654321"
+    }
+  },
+
+  "mock_responses": {
+    "health": {
+      "text_inference": {
+        "status": "ok",
+        "model_loaded": true,
+        "detector_loaded": true
+      },
+      "voice_inference": {
+        "status": "ok",
+        "stt_loaded": true,
+        "tts_loaded": true
+      }
+    },
+    "supported_languages": [
+      {"code": "en", "name": "English"},
+      {"code": "es", "name": "Spanish"},
+      {"code": "fr", "name": "French"},
+      {"code": "de", "name": "German"},
+      {"code": "ja", "name": "Japanese"},
+      {"code": "zh", "name": "Chinese"}
+    ]
+  }
+}
