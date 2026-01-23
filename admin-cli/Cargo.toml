@@ -11,9 +11,9 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 futures = "0.3"
 cosmrs = { version = "0.20", features = ["bip32"] }
 bip39 = { version = "2.2.2" }
-tonic = { version = "0.12", features = ["tls", "tls-roots"] }
+tonic = { version = "0.14.2", features = ["transport", "tls", "tls-webpki-roots"] }
 prost = { version = "0.14.1", default-features = false, features = ["derive"] }
-linguabridge-types = { path = "../linguabridge-types" }
+linguabridge-types = { path = "../linguabridge-types", features = ["rpc"] }
 aes-gcm = "0.10"
 hkdf = "0.12"
 sha2 = "0.10"
@@ -30,3 +30,5 @@ reqwest = { version = "0.12", features = ["json"] }
 base64 = "0.22"
 rand = "0.8"
 zeroize = { version = "1.8", features = ["derive"] }
+arboard = "3.4"
+serde_yaml = "0.9"

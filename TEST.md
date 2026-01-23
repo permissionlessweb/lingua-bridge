@@ -103,32 +103,7 @@ This installs `cargo-tarpaulin` and Python test dependencies.
 
 Discord tests require a real Discord bot and test server. Without configuration, these tests are skipped.
 
-### Step 1: Create a Test Discord Bot
-
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click "New Application" and name it (e.g., "LinguaBridge Test Bot")
-3. Go to "Bot" section and click "Add Bot"
-4. Under "Privileged Gateway Intents", enable:
-   - Presence Intent
-   - Server Members Intent
-   - Message Content Intent
-5. Click "Reset Token" and copy the token
-
-### Step 2: Create a Test Discord Server
-
-1. Create a new Discord server for testing
-2. Create these channels:
-   - Text channel: `test-translations`
-   - Voice channel: `Test Voice`
-3. Copy the Server ID (right-click server name → Copy Server ID)
-   - Enable Developer Mode in Discord settings if you don't see this option
-
-### Step 3: Invite the Bot to Your Test Server
-
-1. In Developer Portal, go to "OAuth2" → "URL Generator"
-2. Select scopes: `bot`, `applications.commands`
-3. Select permissions: `Send Messages`, `Read Message History`, `Connect`, `Speak`
-4. Copy the generated URL and open it to invite the bot
+Invite your discord bot via [the instructions](DISCORD.md), and then set the following environment variables before running the e2e tests:
 
 ### Step 4: Set Environment Variables
 

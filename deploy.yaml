@@ -1,98 +1,110 @@
 # LinguaBridge Akash Network Deployment
 #
-# This SDL (Stack Definition Language) file deploys LinguaBridge to Akash Network.
+# Three-tier architecture: text inference (GPU), voice inference (GPU), bot (CPU).
 #
 # Before deploying:
 # 1. Generate admin keys: cargo run -p admin-cli -- keygen
 # 2. Replace <YOUR_ADMIN_PUBLIC_KEY> with contents of admin.pub
-# 3. Build and push Docker images to GHCR
+# 3. Build and push Docker images to GHCR with explicit version tags
 # 4. Update GHCR credentials below (username + PAT with read:packages scope)
+# 5. Update image tags to match your pushed versions
 #
 # After deployment:
 # 1. Note the assigned URIs from Akash
-# 2. Provision the bot: linguabridge-admin provision --bot-url https://<akash-uri>:9999 --discord-token "token" --admin-key admin.key
+# 2. Provision the bot:
+#    linguabridge-admin provision --bot-url https://<akash-uri>:9999 \
+#      --discord-token "token" --admin-key admin.key
 
 version: "2.0"
 
 services:
   # TranslateGemma inference service (GPU required)
+  # Base: nvidia/cuda:12.4.1-runtime-ubuntu22.04, Python 3.11
   inference:
-    image: ghcr.io/permissionlessweb/linguabridge-inference:latest
+    image: ghcr.io/permissionlessweb/linguabridge-inference:v0.1.0
     credentials:
       host: ghcr.io
       username: <GHCR_USERNAME>
       password: <GHCR_PAT>
     env:
-      - DEVICE=cuda
-      - TORCH_DTYPE=bfloat16
-      - TRANSLATEGEMMA_MODEL=google/translategemma-4b-it
-      - HOST=0.0.0.0
-      - PORT=8000
+      - "DEVICE=cuda"
+      - "TORCH_DTYPE=bfloat16"
+      - "TRANSLATEGEMMA_MODEL=google/translategemma-4b-it"
+      - "HOST=0.0.0.0"
+      - "PORT=8000"
+      - "PYTHONUNBUFFERED=1"
+      - "TRANSFORMERS_CACHE=/root/.cache/huggingface"
+      - "HF_HOME=/root/.cache/huggingface"
     expose:
-      # Internal only - bot connects to this
       - port: 8000
         as: 8000
         to:
           - service: bot
 
-  # Voice inference service (STT, TTS, WebSocket) - GPU required
+  # Voice inference service (STT/TTS/WebSocket) - GPU required
+  # Base: nvidia/cuda:12.4.1-runtime-ubuntu22.04, Python 3.11
+  # Models: Distil-Whisper (STT), CosyVoice (TTS), TranslateGemma (translation)
   voice-inference:
-    image: ghcr.io/permissionlessweb/linguabridge-voice:latest
+    image: ghcr.io/permissionlessweb/linguabridge-voice:v0.1.0
     credentials:
       host: ghcr.io
       username: <GHCR_USERNAME>
       password: <GHCR_PAT>
     env:
-      - DEVICE=cuda
-      - TORCH_DTYPE=bfloat16
-      - STT_MODEL=distil-large-v3
-      - TTS_MODEL=CosyVoice2-0.5B
-      - ENABLE_TTS=true
-      - ENABLE_DIARIZATION=false
-      - TRANSLATEGEMMA_MODEL=google/translategemma-4b-it
-      - HOST=0.0.0.0
-      - PORT=8001
+      - "DEVICE=cuda"
+      - "TORCH_DTYPE=bfloat16"
+      - "STT_MODEL=distil-large-v3"
+      - "TTS_MODEL=CosyVoice2-0.5B"
+      - "ENABLE_TTS=true"
+      - "ENABLE_DIARIZATION=false"
+      - "TRANSLATEGEMMA_MODEL=google/translategemma-4b-it"
+      - "HF_TOKEN=<HF_TOKEN>"
+      - "HOST=0.0.0.0"
+      - "PORT=8001"
+      - "PYTHONUNBUFFERED=1"
+      - "TRANSFORMERS_CACHE=/root/.cache/huggingface"
+      - "HF_HOME=/root/.cache/huggingface"
     expose:
-      # Internal WebSocket - bot connects to this
       - port: 8001
         as: 8001
         to:
           - service: bot
 
-  # LinguaBridge Discord bot and web server
+  # LinguaBridge Discord bot and web server (CPU only)
+  # Base: debian:trixie-slim, Rust binary
   bot:
-    image: ghcr.io/permissionlessweb/linguabridge-bot:latest
+    image: ghcr.io/permissionlessweb/linguabridge-bot:v0.1.0
     credentials:
       host: ghcr.io
       username: <GHCR_USERNAME>
       password: <GHCR_PAT>
-    depends_on:
+    dependencies:
       - service: inference
+      - service: voice-inference
     env:
-      # IMPORTANT: Replace with your admin public key (from admin.pub)
-      # This is safe to expose - it's just the public key for verification
-      - LINGUABRIDGE_ADMIN__PUBLIC_KEY=<YOUR_ADMIN_PUBLIC_KEY>
-      - LINGUABRIDGE_ADMIN__PORT=9999
-      - LINGUABRIDGE_ADMIN__HOST=0.0.0.0
-      # Internal service URL (Akash DNS)
-      - LINGUABRIDGE_INFERENCE__URL=http://inference:8000
-      - LINGUABRIDGE_INFERENCE__MODEL=google/translategemma-4b-it
-      # Web server config
-      - LINGUABRIDGE_WEB__HOST=0.0.0.0
-      - LINGUABRIDGE_WEB__PORT=3000
-      # Update this after deployment with your actual Akash URI
-      - LINGUABRIDGE_WEB__PUBLIC_URL=https://your-deployment.akash.network
+      # Admin provisioning (public key only - safe to expose)
+      - "LINGUABRIDGE_ADMIN__PUBLIC_KEY=<YOUR_ADMIN_PUBLIC_KEY>"
+      - "LINGUABRIDGE_ADMIN__PORT=9999"
+      - "LINGUABRIDGE_ADMIN__HOST=0.0.0.0"
+      # Internal service URLs (Akash DNS resolution)
+      - "LINGUABRIDGE_INFERENCE__URL=http://inference:8000"
+      - "LINGUABRIDGE_VOICE__URL=ws://voice-inference:8001/voice"
+      - "LINGUABRIDGE_VOICE__ENABLE_TTS_PLAYBACK=false"
+      - "LINGUABRIDGE_VOICE__DEFAULT_TARGET_LANGUAGE=en"
+      # Web server
+      - "LINGUABRIDGE_WEB__HOST=0.0.0.0"
+      - "LINGUABRIDGE_WEB__PORT=3000"
+      - "LINGUABRIDGE_WEB__PUBLIC_URL=https://your-deployment.akash.network"
       # Database (persistent storage)
-      - LINGUABRIDGE_DATABASE__URL=sqlite:///data/linguabridge.db?mode=rwc
-      - RUST_LOG=linguabridge=info,tower_http=info
+      - "LINGUABRIDGE_DATABASE__URL=sqlite:///data/linguabridge.db?mode=rwc"
+      - "RUST_LOG=linguabridge=info,tower_http=info"
     expose:
       # Web interface - publicly accessible
       - port: 3000
         as: 80
         to:
           - global: true
-      # Admin provisioning endpoint - publicly accessible for remote provisioning
-      # Security: Only accepts signed requests from admin key holder
+      # Admin provisioning endpoint - signed requests only
       - port: 9999
         as: 9999
         to:
@@ -111,6 +123,8 @@ profiles:
           units: 4
         memory:
           size: 16Gi
+        storage:
+          size: 20Gi
         gpu:
           units: 1
           attributes:
@@ -121,14 +135,15 @@ profiles:
                 - model: rtx4080
                 - model: rtx4090
                 - model: a100
-        storage:
-          - size: 20Gi  # Model cache
+
     voice-inference:
       resources:
         cpu:
           units: 4
         memory:
-          size: 24Gi  # Whisper + CosyVoice + TranslateGemma
+          size: 24Gi
+        storage:
+          size: 30Gi
         gpu:
           units: 1
           attributes:
@@ -139,8 +154,7 @@ profiles:
                 - model: rtx4080
                 - model: rtx4090
                 - model: a100
-        storage:
-          - size: 30Gi  # Model cache for STT/TTS
+
     bot:
       resources:
         cpu:
@@ -148,6 +162,8 @@ profiles:
         memory:
           size: 512Mi
         storage:
+          - name: default
+            size: 1Gi
           - name: data
             size: 1Gi
             attributes:
@@ -155,7 +171,7 @@ profiles:
               class: beta3
 
   placement:
-    akash:
+    dcloud:
       attributes:
         host: akash
       signedBy:
@@ -175,33 +191,14 @@ profiles:
 
 deployment:
   inference:
-    akash:
+    dcloud:
       profile: inference
       count: 1
   voice-inference:
-    akash:
+    dcloud:
       profile: voice-inference
       count: 1
   bot:
-    akash:
+    dcloud:
       profile: bot
       count: 1
-
-# =============================================================================
-# ALTERNATIVE: Public Registry (no credentials needed)
-# =============================================================================
-# If your images are public, you can remove the credentials blocks:
-#
-# services:
-#   inference:
-#     image: ghcr.io/yourusername/linguabridge-inference:latest
-#     env:
-#       - DEVICE=cuda
-#       ...
-#
-#   bot:
-#     image: ghcr.io/yourusername/linguabridge-bot:latest
-#     env:
-#       - LINGUABRIDGE_ADMIN__PUBLIC_KEY=<YOUR_ADMIN_PUBLIC_KEY>
-#       ...
-# =============================================================================

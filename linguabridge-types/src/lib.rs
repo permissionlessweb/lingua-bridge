@@ -60,6 +60,11 @@ pub mod cosmos {
     pub mod v1 {
         include!("gen/cosmos_proto.rs");
     }
+    pub mod bank {
+        pub mod v1beta1 {
+            include!("gen/cosmos.bank.v1beta1.rs");
+        }
+    }
 }
 
 pub mod tendermint {

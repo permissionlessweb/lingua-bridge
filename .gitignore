@@ -1,7 +1,7 @@
 /target
 
 # Admin keys (contains secrets)
-admin*
+admin.key
 
 # Configured deployment files (contains GHCR PAT)
 deploy-configured.yaml
