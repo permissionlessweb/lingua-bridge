@@ -9,3 +9,4 @@ pub mod web;
 
 pub use config::AppConfig;
 pub use error::{AppError, AppResult};
+
