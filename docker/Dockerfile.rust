@@ -13,16 +13,19 @@ WORKDIR /app
 # Copy dependency files first for caching (including workspace members)
 COPY Cargo.toml Cargo.lock ./
 COPY admin-cli/Cargo.toml ./admin-cli/
+COPY linguabridge-types/Cargo.toml ./linguabridge-types/
 
 # Create dummy source files for dependency compilation
-RUN mkdir -p src admin-cli/src && \
+RUN mkdir -p src admin-cli/src linguabridge-types/src && \
     echo "fn main() {}" > src/main.rs && \
     echo "fn main() {}" > admin-cli/src/main.rs && \
+    echo "pub fn dummy() {}" > linguabridge-types/src/lib.rs && \
     cargo build --release -p linguabridge && \
-    rm -rf src admin-cli/src
+    rm -rf src admin-cli/src linguabridge-types/src
 
 # Copy actual source code
 COPY src ./src
+COPY linguabridge-types ./linguabridge-types
 COPY config ./config
 
 # Build the actual application (only the bot, not admin-cli)

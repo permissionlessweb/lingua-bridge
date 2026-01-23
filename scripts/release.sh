@@ -116,6 +116,25 @@ run_cmd() {
     fi
 }
 
+# Check if already logged in to a registry
+is_logged_in() {
+    local registry=$1
+
+    # Try to read docker config
+    local docker_config="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+
+    if [ ! -f "$docker_config" ]; then
+        return 1
+    fi
+
+    # Check if registry is in auths section
+    if grep -q "\"$registry\"" "$docker_config" 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Detect native architecture
 detect_native_arch() {
     local arch
@@ -391,25 +410,33 @@ push_existing_image() {
 
 # Login to registries
 if [ "$PUSH_GHCR" = true ] && [ "$DRY_RUN" = false ]; then
-    log_info "Logging in to GitHub Container Registry..."
-    log_info "Owner/Org: $GHCR_OWNER"
-    echo "Please enter your GitHub Personal Access Token (with write:packages scope):"
-    if [ -t 0 ]; then
-        read -rp "GitHub username for authentication: " GITHUB_AUTH_USER
-        docker login ghcr.io -u "$GITHUB_AUTH_USER"
+    if is_logged_in "ghcr.io"; then
+        log_success "Already logged in to GitHub Container Registry"
     else
-        log_warn "Non-interactive mode - assuming already logged in to GHCR"
+        log_info "Logging in to GitHub Container Registry..."
+        log_info "Owner/Org: $GHCR_OWNER"
+        echo "Please enter your GitHub Personal Access Token (with write:packages scope):"
+        if [ -t 0 ]; then
+            read -rp "GitHub username for authentication: " GITHUB_AUTH_USER
+            docker login ghcr.io -u "$GITHUB_AUTH_USER"
+        else
+            log_warn "Non-interactive mode - assuming already logged in to GHCR"
+        fi
     fi
 fi
 
 if [ "$PUSH_DOCKERHUB" = true ] && [ "$DRY_RUN" = false ]; then
-    log_info "Logging in to Docker Hub..."
-    log_info "Owner/Org: $DOCKERHUB_OWNER"
-    if [ -t 0 ]; then
-        read -rp "Docker Hub username for authentication: " DOCKERHUB_AUTH_USER
-        docker login -u "$DOCKERHUB_AUTH_USER"
+    if is_logged_in "https://index.docker.io/v1/"; then
+        log_success "Already logged in to Docker Hub"
     else
-        log_warn "Non-interactive mode - assuming already logged in to Docker Hub"
+        log_info "Logging in to Docker Hub..."
+        log_info "Owner/Org: $DOCKERHUB_OWNER"
+        if [ -t 0 ]; then
+            read -rp "Docker Hub username for authentication: " DOCKERHUB_AUTH_USER
+            docker login -u "$DOCKERHUB_AUTH_USER"
+        else
+            log_warn "Non-interactive mode - assuming already logged in to Docker Hub"
+        fi
     fi
 fi
 

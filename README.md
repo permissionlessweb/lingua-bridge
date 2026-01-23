@@ -15,6 +15,41 @@ Real-time Discord translation bot powered by Google's TranslateGemma models. Tra
 
 ---
 
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S as Songbird (Rust)
+    participant B as AudioBufferManager
+    participant WS as WebSocket Client
+    participant STT as STT Engine
+    participant T as Translation Engine
+    participant TTS as TTS Engine
+    participant VB as VoiceBridge
+    participant WC as Web Client
+    participant DT as Discord Thread
+    participant TP as TTS Playback
+
+    U->>S: Speaks in Discord voice channel
+    S->>S: Decode Opus → PCM i16 stereo
+    S->>S: Stereo → Mono conversion
+    S->>B: Push audio packets per user
+    B->>B: Accumulate samples with VAD
+    B->>B: Detect silence (800ms) → Flush buffer
+    B->>WS: Create AudioSegment → Base64 encode → WebSocket
+    WS->>STT: Send audio to Python service
+    STT->>STT: Resample 48kHz → 16kHz
+    STT->>STT: Speech-to-text transcription
+    STT->>T: Pass text to translation
+    T->>T: Translate if source ≠ target
+    T->>TTS: Pass translated text to TTS
+    TTS->>TTS: Synthesize speech (if enabled)
+    TTS->>WS: Return result JSON via WebSocket
+    WS->>VB: Receive result in Rust
+    VB->>WC: Broadcast to web clients
+    VB->>DT: Post to Discord threads
+    VB->>TP: Play TTS in voice channel (optional)
+```
+
 ## Quick Start
 
 ### Prerequisites
