@@ -80,6 +80,7 @@ zeroize = { version = "1.8", features = ["derive"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
+proptest = "1.4"
 
 [profile.release]
 lto = true

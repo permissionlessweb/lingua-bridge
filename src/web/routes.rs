@@ -313,6 +313,116 @@ fn generate_web_view_html(session_id: &str) -> String {
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::web::broadcast::BroadcastManager;
+    use crate::db::queries::setup_test_db;
+
+    #[tokio::test]
+    async fn test_health_returns_ok() {
+        let resp = health().await;
+        assert_eq!(resp.0.status, "ok");
+        assert!(!resp.0.version.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_health_version_matches_cargo() {
+        let resp = health().await;
+        assert_eq!(resp.0.version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn test_get_session_info_valid() {
+        let pool = setup_test_db().await;
+        let broadcast = Arc::new(BroadcastManager::new());
+        let state = AppState {
+            pool: pool.clone(),
+            broadcast,
+        };
+
+        // Create a session first
+        let new_session = crate::db::models::NewWebSession {
+            user_id: "u1".to_string(),
+            guild_id: "g1".to_string(),
+            channel_id: Some("ch1".to_string()),
+        };
+        let session = crate::db::WebSessionRepo::create(&pool, new_session, 24)
+            .await
+            .unwrap();
+
+        // Query session info
+        let resp = get_session_info(
+            Path(session.session_id),
+            State(state),
+        )
+        .await;
+
+        assert!(resp.0.valid);
+        assert_eq!(resp.0.guild_id, Some("g1".to_string()));
+        assert_eq!(resp.0.channel_id, Some("ch1".to_string()));
+        assert!(resp.0.expires_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_session_info_invalid() {
+        let pool = setup_test_db().await;
+        let broadcast = Arc::new(BroadcastManager::new());
+        let state = AppState {
+            pool,
+            broadcast,
+        };
+
+        let resp = get_session_info(
+            Path("nonexistent-session".to_string()),
+            State(state),
+        )
+        .await;
+
+        assert!(!resp.0.valid);
+        assert!(resp.0.guild_id.is_none());
+        assert!(resp.0.channel_id.is_none());
+        assert!(resp.0.expires_at.is_none());
+    }
+
+    #[test]
+    fn test_health_response_serialize() {
+        let resp = HealthResponse {
+            status: "ok".to_string(),
+            version: "0.1.0".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"status\":\"ok\""));
+        assert!(json.contains("\"version\":\"0.1.0\""));
+    }
+
+    #[test]
+    fn test_session_info_serialize_valid() {
+        let info = SessionInfo {
+            valid: true,
+            guild_id: Some("g123".to_string()),
+            channel_id: Some("ch456".to_string()),
+            expires_at: Some("2025-01-01T00:00:00Z".to_string()),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"valid\":true"));
+        assert!(json.contains("g123"));
+    }
+
+    #[test]
+    fn test_session_info_serialize_invalid() {
+        let info = SessionInfo {
+            valid: false,
+            guild_id: None,
+            channel_id: None,
+            expires_at: None,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"valid\":false"));
+        assert!(json.contains("null"));
+    }
+}
+
 /// Create the web router
 pub fn create_router(state: AppState, translator: Arc<TranslationClient>) -> Router {
     let cors = CorsLayer::new()

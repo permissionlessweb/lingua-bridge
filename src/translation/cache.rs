@@ -190,4 +190,171 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(10));
         assert_eq!(cache.get(&key), None);
     }
+
+    #[test]
+    fn test_cache_overwrite() {
+        let cache = TranslationCache::new(3600, 1000);
+        let key = CacheKey {
+            text: "Hello".to_string(),
+            source_lang: "en".to_string(),
+            target_lang: "es".to_string(),
+        };
+
+        cache.insert(key.clone(), "Hola".to_string());
+        cache.insert(key.clone(), "Hola!".to_string());
+        assert_eq!(cache.get(&key), Some("Hola!".to_string()));
+    }
+
+    #[test]
+    fn test_cache_different_keys() {
+        let cache = TranslationCache::new(3600, 1000);
+        let key1 = CacheKey {
+            text: "Hello".to_string(),
+            source_lang: "en".to_string(),
+            target_lang: "es".to_string(),
+        };
+        let key2 = CacheKey {
+            text: "Hello".to_string(),
+            source_lang: "en".to_string(),
+            target_lang: "fr".to_string(),
+        };
+
+        cache.insert(key1.clone(), "Hola".to_string());
+        cache.insert(key2.clone(), "Bonjour".to_string());
+        assert_eq!(cache.get(&key1), Some("Hola".to_string()));
+        assert_eq!(cache.get(&key2), Some("Bonjour".to_string()));
+    }
+
+    #[test]
+    fn test_cache_clear() {
+        let cache = TranslationCache::new(3600, 1000);
+        let key = CacheKey {
+            text: "Hello".to_string(),
+            source_lang: "en".to_string(),
+            target_lang: "es".to_string(),
+        };
+
+        cache.insert(key.clone(), "Hola".to_string());
+        assert_eq!(cache.len(), 1);
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_cache_stats() {
+        let cache = TranslationCache::new(3600, 100);
+        let key = CacheKey {
+            text: "Hello".to_string(),
+            source_lang: "en".to_string(),
+            target_lang: "es".to_string(),
+        };
+
+        cache.insert(key, "Hola".to_string());
+        let stats = cache.stats();
+        assert_eq!(stats.total_entries, 1);
+        assert_eq!(stats.expired_entries, 0);
+        assert_eq!(stats.max_size, 100);
+        assert_eq!(stats.ttl_secs, 3600);
+    }
+
+    #[test]
+    fn test_cache_evict_expired() {
+        let cache = TranslationCache::new(0, 1000); // 0 TTL = instant expiry
+        let key = CacheKey {
+            text: "Hello".to_string(),
+            source_lang: "en".to_string(),
+            target_lang: "es".to_string(),
+        };
+
+        cache.insert(key, "Hola".to_string());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        cache.evict_expired();
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_cache_max_size_eviction() {
+        let cache = TranslationCache::new(3600, 50);
+
+        for i in 0..200 {
+            let key = CacheKey {
+                text: format!("text_{}", i),
+                source_lang: "en".to_string(),
+                target_lang: "es".to_string(),
+            };
+            cache.insert(key, format!("translated_{}", i));
+        }
+
+        // Cache should stay bounded (eviction removes 10% each time)
+        assert!(cache.len() <= 50, "Cache size {} exceeds max 50", cache.len());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn cache_insert_then_get(
+            text in "\\PC{1,50}",
+            src in "[a-z]{2}",
+            tgt in "[a-z]{2}",
+            result in "\\PC{1,100}"
+        ) {
+            let cache = TranslationCache::new(3600, 1000);
+            let key = CacheKey {
+                text: text,
+                source_lang: src,
+                target_lang: tgt,
+            };
+            cache.insert(key.clone(), result.clone());
+            let retrieved = cache.get(&key);
+            prop_assert_eq!(retrieved, Some(result));
+        }
+
+        #[test]
+        fn cache_respects_max_size(
+            entries in prop::collection::vec(
+                ("[a-z]{5,10}", "[a-z]{2}", "[a-z]{2}", "[a-z]{10,50}"),
+                1..100
+            )
+        ) {
+            let max_size = 20;
+            let cache = TranslationCache::new(3600, max_size);
+
+            for (text, src, tgt, result) in entries {
+                let key = CacheKey {
+                    text,
+                    source_lang: src,
+                    target_lang: tgt,
+                };
+                cache.insert(key, result);
+            }
+
+            prop_assert!(cache.len() <= max_size);
+        }
+
+        #[test]
+        fn cache_overwrite_returns_latest(
+            text in "\\PC{1,50}",
+            src in "[a-z]{2}",
+            tgt in "[a-z]{2}",
+            result1 in "\\PC{1,100}",
+            result2 in "\\PC{1,100}"
+        ) {
+            let cache = TranslationCache::new(3600, 1000);
+            let key = CacheKey {
+                text,
+                source_lang: src,
+                target_lang: tgt,
+            };
+            cache.insert(key.clone(), result1);
+            cache.insert(key.clone(), result2.clone());
+            let retrieved = cache.get(&key);
+            prop_assert_eq!(retrieved, Some(result2));
+        }
+    }
 }

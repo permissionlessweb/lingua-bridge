@@ -244,6 +244,144 @@ mod tests {
         (signing_key, public_key_base64)
     }
 
+    #[test]
+    fn test_admin_error_status_codes() {
+        use axum::response::IntoResponse;
+
+        let crypto_err = AdminError::Crypto(CryptoError::InvalidPublicKey);
+        let resp = crypto_err.into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let invalid_req = AdminError::InvalidRequest("bad".to_string());
+        let resp = invalid_req.into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let already = AdminError::AlreadyProvisioned;
+        let resp = already.into_response();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+        let deser = AdminError::DeserializationFailed("parse error".to_string());
+        let resp = deser.into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_admin_state_creation() {
+        let (_, public_key_base64) = generate_admin_keys();
+        let secret_store = create_secret_store();
+        let state = AdminState::new(&public_key_base64, secret_store);
+        assert!(state.is_ok());
+    }
+
+    #[test]
+    fn test_admin_state_invalid_key() {
+        let secret_store = create_secret_store();
+        let result = AdminState::new("not-valid-base64!!!", secret_store);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_public_key() {
+        let (_, public_key_base64) = generate_admin_keys();
+        let secret_store = create_secret_store();
+        let state = Arc::new(AdminState::new(&public_key_base64, secret_store).unwrap());
+
+        let result = get_public_key(State(state)).await;
+        assert!(result.is_ok());
+        let resp = result.unwrap();
+        assert!(!resp.0.public_key.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_status_waiting() {
+        let (_, public_key_base64) = generate_admin_keys();
+        let secret_store = create_secret_store();
+        let state = Arc::new(AdminState::new(&public_key_base64, secret_store).unwrap());
+
+        let result = get_status(State(state)).await;
+        assert_eq!(result.0.status, ProvisioningStatus::WaitingForProvisioning);
+    }
+
+    #[tokio::test]
+    async fn test_provision_invalid_signature() {
+        let (_, public_key_base64) = generate_admin_keys();
+        let secret_store = create_secret_store();
+        let state = Arc::new(AdminState::new(&public_key_base64, secret_store).unwrap());
+
+        // Create a request with bogus signature
+        let admin_x25519_secret = EphemeralSecret::random_from_rng(OsRng);
+        let admin_x25519_public = x25519_dalek::PublicKey::from(&admin_x25519_secret);
+
+        let request = ProvisionRequest {
+            admin_x25519_public: BASE64.encode(admin_x25519_public.as_bytes()),
+            ciphertext: BASE64.encode(b"fake ciphertext"),
+            nonce: BASE64.encode([0u8; 12]),
+            signature: BASE64.encode([0u8; 64]), // Invalid signature
+        };
+
+        let result = provision(State(state), Json(request)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_provision_already_provisioned() {
+        use crate::admin::crypto::encrypt_payload;
+        use crate::admin::secrets::SecretsPayload;
+        use ed25519_dalek::Signer;
+
+        let (admin_signing_key, admin_public_key_base64) = generate_admin_keys();
+        let secret_store = create_secret_store();
+        let state = Arc::new(AdminState::new(&admin_public_key_base64, secret_store.clone()).unwrap());
+
+        // First provision succeeds
+        let bot_public_key_base64 = {
+            let guard = state.keypair.read().await;
+            guard.as_ref().unwrap().public_key_base64()
+        };
+        let bot_public_key = parse_x25519_public_key(&bot_public_key_base64).unwrap();
+
+        let admin_x25519_secret = EphemeralSecret::random_from_rng(OsRng);
+        let admin_x25519_public = x25519_dalek::PublicKey::from(&admin_x25519_secret);
+        let shared_secret = admin_x25519_secret.diffie_hellman(&bot_public_key);
+
+        let secrets = SecretsPayload {
+            discord_token: "token".to_string(),
+            hf_token: None,
+            custom: Default::default(),
+        };
+        let plaintext = serde_json::to_vec(&secrets).unwrap();
+        let (nonce, ciphertext) = encrypt_payload(&shared_secret, &plaintext).unwrap();
+
+        let ciphertext_bytes = BASE64.decode(&ciphertext).unwrap();
+        let nonce_bytes = BASE64.decode(&nonce).unwrap();
+        let message = build_signature_message(
+            admin_x25519_public.as_bytes(),
+            &ciphertext_bytes,
+            &nonce_bytes,
+        );
+        let signature = admin_signing_key.sign(&message);
+
+        let request = ProvisionRequest {
+            admin_x25519_public: BASE64.encode(admin_x25519_public.as_bytes()),
+            ciphertext,
+            nonce,
+            signature: BASE64.encode(signature.to_bytes()),
+        };
+        provision(State(state.clone()), Json(request)).await.unwrap();
+
+        // Second provision attempt should fail
+        let admin_x25519_secret2 = EphemeralSecret::random_from_rng(OsRng);
+        let admin_x25519_public2 = x25519_dalek::PublicKey::from(&admin_x25519_secret2);
+        let request2 = ProvisionRequest {
+            admin_x25519_public: BASE64.encode(admin_x25519_public2.as_bytes()),
+            ciphertext: BASE64.encode(b"fake"),
+            nonce: BASE64.encode([0u8; 12]),
+            signature: BASE64.encode([0u8; 64]),
+        };
+        let result = provision(State(state), Json(request2)).await;
+        assert!(result.is_err());
+    }
+
     #[tokio::test]
     async fn test_provision_flow() {
         use crate::admin::crypto::encrypt_payload;

@@ -302,4 +302,127 @@ mod tests {
         // TranslateGemma supports ~55 languages, we have 49 most common ones
         assert!(Language::all().len() >= 40);
     }
+
+    #[test]
+    fn test_all_languages_code_roundtrip() {
+        for lang in Language::all() {
+            let code = lang.code();
+            let parsed = Language::from_code(code);
+            assert_eq!(parsed, Some(*lang), "Roundtrip failed for {:?} (code: {})", lang, code);
+        }
+    }
+
+    #[test]
+    fn test_all_languages_have_nonempty_names() {
+        for lang in Language::all() {
+            assert!(!lang.name().is_empty(), "{:?} has empty name", lang);
+        }
+    }
+
+    #[test]
+    fn test_all_language_codes_are_2_3_chars() {
+        for lang in Language::all() {
+            let code = lang.code();
+            assert!(
+                code.len() >= 2 && code.len() <= 3,
+                "{:?} has code '{}' with length {}",
+                lang, code, code.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_code_to_name_map_complete() {
+        let map = Language::code_to_name_map();
+        assert_eq!(map.len(), Language::all().len());
+    }
+
+    #[test]
+    fn test_legacy_hebrew_code() {
+        assert_eq!(Language::from_code("iw"), Some(Language::Hebrew));
+        assert_eq!(Language::from_code("he"), Some(Language::Hebrew));
+    }
+
+    #[test]
+    fn test_norwegian_variants() {
+        assert_eq!(Language::from_code("no"), Some(Language::Norwegian));
+        assert_eq!(Language::from_code("nb"), Some(Language::Norwegian));
+        assert_eq!(Language::from_code("nn"), Some(Language::Norwegian));
+    }
+
+    #[test]
+    fn test_display_impl() {
+        assert_eq!(format!("{}", Language::English), "English");
+        assert_eq!(format!("{}", Language::Japanese), "Japanese");
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        for lang in Language::all() {
+            let json = serde_json::to_string(lang).unwrap();
+            let parsed: Language = serde_json::from_str(&json).unwrap();
+            assert_eq!(&parsed, lang);
+        }
+    }
+
+    #[test]
+    fn test_from_code_invalid() {
+        assert_eq!(Language::from_code(""), None);
+        assert_eq!(Language::from_code("xyz"), None);
+        assert_eq!(Language::from_code("123"), None);
+        assert_eq!(Language::from_code("zz"), None);
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn any_language() -> impl Strategy<Value = Language> {
+        prop::sample::select(Language::all().to_vec())
+    }
+
+    proptest! {
+        #[test]
+        fn language_code_roundtrip(lang in any_language()) {
+            let code = lang.code();
+            let parsed = Language::from_code(code);
+            prop_assert_eq!(parsed, Some(lang));
+        }
+
+        #[test]
+        fn language_regional_variants(
+            lang in any_language(),
+            suffix in prop_oneof![Just("".to_string()), Just("_US".to_string()), Just("-GB".to_string()), Just("_419".to_string())]
+        ) {
+            let code_with_suffix = format!("{}{}", lang.code(), suffix);
+            let parsed = Language::from_code(&code_with_suffix);
+            prop_assert_eq!(parsed, Some(lang));
+        }
+
+        #[test]
+        fn language_name_not_empty(lang in any_language()) {
+            prop_assert!(!lang.name().is_empty());
+        }
+
+        #[test]
+        fn language_code_length(lang in any_language()) {
+            let code = lang.code();
+            prop_assert!(code.len() >= 2 && code.len() <= 3);
+        }
+
+        #[test]
+        fn language_code_is_lowercase(lang in any_language()) {
+            let code = lang.code();
+            let lowered = code.to_lowercase();
+            prop_assert_eq!(code, lowered.as_str());
+        }
+
+        #[test]
+        fn invalid_codes_return_none(code in "[a-z]{4,10}") {
+            // Any code longer than 3 chars should not match
+            prop_assert_eq!(Language::from_code(&code), None);
+        }
+    }
 }

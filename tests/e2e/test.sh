@@ -61,15 +61,18 @@ install_deps() {
 
 # Check if deps are already installed
 deps_installed() {
-    python -c "import pytest, fastapi, websockets, playwright" 2>/dev/null
+    python -c "import pytest, fastapi, websockets, playwright, pytest_cov" 2>/dev/null
 }
 
-# Handle --clean flag
+# Handle --clean and --coverage flags
 CLEAN=0
+COVERAGE=0
 ARGS=()
 for arg in "$@"; do
     if [ "$arg" = "--clean" ]; then
         CLEAN=1
+    elif [ "$arg" = "--coverage" ]; then
+        COVERAGE=1
     else
         ARGS+=("$arg")
     fi
@@ -95,9 +98,20 @@ main() {
     log "Running e2e tests..."
     echo ""
 
-    # Run tests, passing arguments through (excluding --clean)
+    # Add coverage args if requested
+    if [ $COVERAGE -eq 1 ]; then
+        log "Coverage reporting enabled"
+        ARGS+=(--coverage)
+    fi
+
+    # Run tests, passing arguments through (excluding --clean/--coverage)
     python run_tests.py "${ARGS[@]}"
     exit_code=$?
+
+    if [ $COVERAGE -eq 1 ] && [ $exit_code -eq 0 ]; then
+        echo ""
+        log "Coverage report: tests/e2e/coverage_html/index.html"
+    fi
 
     if [ $exit_code -eq 0 ]; then
         echo ""

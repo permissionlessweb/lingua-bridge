@@ -157,7 +157,7 @@ def run_pytest(
 
     # Determine test path
     if test_type == "discord":
-        pytest_args.append(str(TEST_DIR / "discord"))
+        pytest_args.append(str(TEST_DIR / "discord_tests"))
     elif test_type == "web":
         pytest_args.append(str(TEST_DIR / "web"))
     elif test_type == "mocks":
@@ -237,6 +237,11 @@ Examples:
         action="store_true",
         help="Decrease verbosity"
     )
+    parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help="Enable code coverage reporting (pytest-cov)"
+    )
 
     args = parser.parse_args()
 
@@ -262,6 +267,14 @@ Examples:
         extra_args.append("-x")
     if args.collect_only:
         extra_args.append("--collect-only")
+    if args.coverage:
+        extra_args.extend([
+            "--cov=.",
+            "--cov-report=term-missing",
+            "--cov-report=html:coverage_html",
+            "--cov-config=.coveragerc",
+            "--cov-fail-under=70",
+        ])
 
     # Run tests
     if args.no_mocks:

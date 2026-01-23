@@ -127,8 +127,11 @@ def mock_text_client():
 async def mock_voice_websocket():
     """WebSocket connection to mock voice service."""
     uri = "ws://localhost:8001"
-    async with websockets.connect(uri) as ws:
-        yield ws
+    try:
+        async with websockets.connect(uri, open_timeout=2) as ws:
+            yield ws
+    except Exception as e:
+        pytest.skip(f"Could not connect to voice mock at {uri}: {e}")
 
 
 @pytest.fixture

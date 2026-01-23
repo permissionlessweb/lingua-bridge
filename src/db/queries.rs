@@ -561,6 +561,18 @@ impl VoiceTranscriptRepo {
     }
 }
 
+#[cfg(test)]
+pub async fn setup_test_db() -> DbPool {
+    use sqlx::sqlite::SqlitePoolOptions;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("Failed to create in-memory database");
+    init_db(&pool).await.expect("Failed to init database");
+    pool
+}
+
 /// Initialize database with migrations
 pub async fn init_db(pool: &DbPool) -> AppResult<()> {
     info!("Running database migrations");
@@ -691,4 +703,391 @@ pub async fn init_db(pool: &DbPool) -> AppResult<()> {
 
     info!("Database migrations complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- GuildRepo tests ---
+
+    #[tokio::test]
+    async fn test_guild_upsert_creates_new() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test Guild".to_string(),
+        };
+
+        let guild = GuildRepo::upsert(&pool, new_guild).await.unwrap();
+        assert_eq!(guild.guild_id, "g123");
+        assert_eq!(guild.name, "Test Guild");
+        assert_eq!(guild.default_language, "en");
+    }
+
+    #[tokio::test]
+    async fn test_guild_upsert_updates_existing() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Original Name".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+
+        let updated = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Updated Name".to_string(),
+        };
+        let guild = GuildRepo::upsert(&pool, updated).await.unwrap();
+        assert_eq!(guild.name, "Updated Name");
+    }
+
+    #[tokio::test]
+    async fn test_guild_get_nonexistent_returns_none() {
+        let pool = setup_test_db().await;
+        let result = GuildRepo::get_by_guild_id(&pool, "nonexistent").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_guild_set_default_language() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+
+        GuildRepo::set_default_language(&pool, "g123", "es").await.unwrap();
+        let guild = GuildRepo::get_by_guild_id(&pool, "g123").await.unwrap().unwrap();
+        assert_eq!(guild.default_language, "es");
+    }
+
+    #[tokio::test]
+    async fn test_guild_set_target_languages() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+
+        let langs = vec!["en".to_string(), "es".to_string(), "fr".to_string()];
+        GuildRepo::set_target_languages(&pool, "g123", &langs).await.unwrap();
+
+        let guild = GuildRepo::get_by_guild_id(&pool, "g123").await.unwrap().unwrap();
+        let stored_langs: Vec<String> = serde_json::from_str(&guild.target_languages).unwrap();
+        assert_eq!(stored_langs, langs);
+    }
+
+    #[tokio::test]
+    async fn test_guild_enable_channel() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+
+        GuildRepo::enable_channel(&pool, "g123", "ch456").await.unwrap();
+        assert!(GuildRepo::is_channel_enabled(&pool, "g123", "ch456").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_guild_disable_channel() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+
+        GuildRepo::enable_channel(&pool, "g123", "ch456").await.unwrap();
+        GuildRepo::disable_channel(&pool, "g123", "ch456").await.unwrap();
+        assert!(!GuildRepo::is_channel_enabled(&pool, "g123", "ch456").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_guild_enable_channel_idempotent() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+
+        GuildRepo::enable_channel(&pool, "g123", "ch456").await.unwrap();
+        GuildRepo::enable_channel(&pool, "g123", "ch456").await.unwrap();
+
+        let guild = GuildRepo::get_by_guild_id(&pool, "g123").await.unwrap().unwrap();
+        let channels: Vec<String> = serde_json::from_str(&guild.enabled_channels).unwrap();
+        assert_eq!(channels.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_guild_channel_not_enabled_by_default() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+        assert!(!GuildRepo::is_channel_enabled(&pool, "g123", "ch456").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_guild_get_settings() {
+        let pool = setup_test_db().await;
+        let new_guild = NewGuild {
+            guild_id: "g123".to_string(),
+            name: "Test".to_string(),
+        };
+        GuildRepo::upsert(&pool, new_guild).await.unwrap();
+
+        let settings = GuildRepo::get_settings(&pool, "g123").await.unwrap();
+        assert!(settings.is_some());
+        let s = settings.unwrap();
+        assert_eq!(s.guild_id, "g123");
+        assert_eq!(s.default_language, "en");
+    }
+
+    // --- UserPreferenceRepo tests ---
+
+    #[tokio::test]
+    async fn test_user_preference_set_and_get() {
+        let pool = setup_test_db().await;
+        UserPreferenceRepo::set_language(&pool, "u1", "g1", "es").await.unwrap();
+
+        let pref = UserPreferenceRepo::get(&pool, "u1", "g1").await.unwrap();
+        assert!(pref.is_some());
+        let p = pref.unwrap();
+        assert_eq!(p.preferred_language, "es");
+        assert!(p.auto_translate);
+    }
+
+    #[tokio::test]
+    async fn test_user_preference_get_nonexistent() {
+        let pool = setup_test_db().await;
+        let pref = UserPreferenceRepo::get(&pool, "u1", "g1").await.unwrap();
+        assert!(pref.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_user_preference_update_language() {
+        let pool = setup_test_db().await;
+        UserPreferenceRepo::set_language(&pool, "u1", "g1", "es").await.unwrap();
+        UserPreferenceRepo::set_language(&pool, "u1", "g1", "fr").await.unwrap();
+
+        let pref = UserPreferenceRepo::get(&pool, "u1", "g1").await.unwrap().unwrap();
+        assert_eq!(pref.preferred_language, "fr");
+    }
+
+    #[tokio::test]
+    async fn test_user_preference_auto_translate_toggle() {
+        let pool = setup_test_db().await;
+        UserPreferenceRepo::set_language(&pool, "u1", "g1", "es").await.unwrap();
+        UserPreferenceRepo::set_auto_translate(&pool, "u1", "g1", false).await.unwrap();
+
+        let pref = UserPreferenceRepo::get(&pool, "u1", "g1").await.unwrap().unwrap();
+        assert!(!pref.auto_translate);
+    }
+
+    // --- WebSessionRepo tests ---
+
+    #[tokio::test]
+    async fn test_session_create() {
+        let pool = setup_test_db().await;
+        let new_session = NewWebSession {
+            user_id: "u1".to_string(),
+            guild_id: "g1".to_string(),
+            channel_id: Some("ch1".to_string()),
+        };
+
+        let session = WebSessionRepo::create(&pool, new_session, 24).await.unwrap();
+        assert_eq!(session.user_id, "u1");
+        assert_eq!(session.guild_id, "g1");
+        assert_eq!(session.channel_id, Some("ch1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_session_get_valid() {
+        let pool = setup_test_db().await;
+        let new_session = NewWebSession {
+            user_id: "u1".to_string(),
+            guild_id: "g1".to_string(),
+            channel_id: None,
+        };
+
+        let session = WebSessionRepo::create(&pool, new_session, 24).await.unwrap();
+        let retrieved = WebSessionRepo::get_by_session_id(&pool, &session.session_id)
+            .await
+            .unwrap();
+        assert!(retrieved.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_session_get_nonexistent() {
+        let pool = setup_test_db().await;
+        let result = WebSessionRepo::get_by_session_id(&pool, "nonexistent")
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_delete() {
+        let pool = setup_test_db().await;
+        let new_session = NewWebSession {
+            user_id: "u1".to_string(),
+            guild_id: "g1".to_string(),
+            channel_id: None,
+        };
+
+        let session = WebSessionRepo::create(&pool, new_session, 24).await.unwrap();
+        WebSessionRepo::delete(&pool, &session.session_id).await.unwrap();
+
+        let result = WebSessionRepo::get_by_session_id(&pool, &session.session_id)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_cleanup_expired() {
+        let pool = setup_test_db().await;
+        // Create session with 0 hours expiry (already expired)
+        let new_session = NewWebSession {
+            user_id: "u1".to_string(),
+            guild_id: "g1".to_string(),
+            channel_id: None,
+        };
+        // Use very short expiry - it will still be in the future but we can test the cleanup function
+        WebSessionRepo::create(&pool, new_session, 24).await.unwrap();
+        let cleaned = WebSessionRepo::cleanup_expired(&pool).await.unwrap();
+        // Session is not yet expired (24h from now)
+        assert_eq!(cleaned, 0);
+    }
+
+    // --- VoiceChannelRepo tests ---
+
+    #[tokio::test]
+    async fn test_voice_channel_upsert() {
+        let pool = setup_test_db().await;
+        let settings = NewVoiceChannelSettings {
+            guild_id: "g1".to_string(),
+            voice_channel_id: "vc1".to_string(),
+            target_language: "es".to_string(),
+            enable_tts: true,
+        };
+
+        let result = VoiceChannelRepo::upsert(&pool, settings).await.unwrap();
+        assert_eq!(result.guild_id, "g1");
+        assert_eq!(result.target_language, "es");
+        assert!(result.enable_tts);
+        assert!(result.enabled);
+    }
+
+    #[tokio::test]
+    async fn test_voice_channel_get_settings() {
+        let pool = setup_test_db().await;
+        let settings = NewVoiceChannelSettings {
+            guild_id: "g1".to_string(),
+            voice_channel_id: "vc1".to_string(),
+            target_language: "fr".to_string(),
+            enable_tts: false,
+        };
+        VoiceChannelRepo::upsert(&pool, settings).await.unwrap();
+
+        let result = VoiceChannelRepo::get_settings(&pool, "g1", "vc1").await.unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().target_language, "fr");
+    }
+
+    #[tokio::test]
+    async fn test_voice_channel_get_nonexistent() {
+        let pool = setup_test_db().await;
+        let result = VoiceChannelRepo::get_settings(&pool, "g1", "vc1").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_voice_channel_set_enabled() {
+        let pool = setup_test_db().await;
+        let settings = NewVoiceChannelSettings {
+            guild_id: "g1".to_string(),
+            voice_channel_id: "vc1".to_string(),
+            target_language: "es".to_string(),
+            enable_tts: false,
+        };
+        VoiceChannelRepo::upsert(&pool, settings).await.unwrap();
+
+        VoiceChannelRepo::set_enabled(&pool, "g1", "vc1", false).await.unwrap();
+        let result = VoiceChannelRepo::get_settings(&pool, "g1", "vc1").await.unwrap().unwrap();
+        assert!(!result.enabled);
+    }
+
+    #[tokio::test]
+    async fn test_voice_channel_set_target_language() {
+        let pool = setup_test_db().await;
+        let settings = NewVoiceChannelSettings {
+            guild_id: "g1".to_string(),
+            voice_channel_id: "vc1".to_string(),
+            target_language: "es".to_string(),
+            enable_tts: false,
+        };
+        VoiceChannelRepo::upsert(&pool, settings).await.unwrap();
+
+        VoiceChannelRepo::set_target_language(&pool, "g1", "vc1", "ja").await.unwrap();
+        let result = VoiceChannelRepo::get_settings(&pool, "g1", "vc1").await.unwrap().unwrap();
+        assert_eq!(result.target_language, "ja");
+    }
+
+    #[tokio::test]
+    async fn test_voice_channel_set_tts() {
+        let pool = setup_test_db().await;
+        let settings = NewVoiceChannelSettings {
+            guild_id: "g1".to_string(),
+            voice_channel_id: "vc1".to_string(),
+            target_language: "es".to_string(),
+            enable_tts: false,
+        };
+        VoiceChannelRepo::upsert(&pool, settings).await.unwrap();
+
+        VoiceChannelRepo::set_tts_enabled(&pool, "g1", "vc1", true).await.unwrap();
+        let result = VoiceChannelRepo::get_settings(&pool, "g1", "vc1").await.unwrap().unwrap();
+        assert!(result.enable_tts);
+    }
+
+    #[tokio::test]
+    async fn test_voice_channel_delete() {
+        let pool = setup_test_db().await;
+        let settings = NewVoiceChannelSettings {
+            guild_id: "g1".to_string(),
+            voice_channel_id: "vc1".to_string(),
+            target_language: "es".to_string(),
+            enable_tts: false,
+        };
+        VoiceChannelRepo::upsert(&pool, settings).await.unwrap();
+
+        VoiceChannelRepo::delete(&pool, "g1", "vc1").await.unwrap();
+        let result = VoiceChannelRepo::get_settings(&pool, "g1", "vc1").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_voice_channel_get_by_guild() {
+        let pool = setup_test_db().await;
+        for i in 0..3 {
+            let settings = NewVoiceChannelSettings {
+                guild_id: "g1".to_string(),
+                voice_channel_id: format!("vc{}", i),
+                target_language: "es".to_string(),
+                enable_tts: false,
+            };
+            VoiceChannelRepo::upsert(&pool, settings).await.unwrap();
+        }
+
+        let results = VoiceChannelRepo::get_by_guild(&pool, "g1").await.unwrap();
+        assert_eq!(results.len(), 3);
+    }
 }

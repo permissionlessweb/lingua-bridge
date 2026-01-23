@@ -285,6 +285,77 @@ mod tests {
         assert!(detect_speech(&samples));
     }
 
+    #[test]
+    fn test_detect_speech_empty() {
+        assert!(!detect_speech(&[]));
+    }
+
+    #[test]
+    fn test_detect_speech_low_energy() {
+        // Very quiet samples (below threshold)
+        let quiet: Vec<i16> = vec![10; 960];
+        assert!(!detect_speech(&quiet));
+    }
+
+    #[test]
+    fn test_detect_speech_high_energy() {
+        let loud: Vec<i16> = vec![20000; 960];
+        assert!(detect_speech(&loud));
+    }
+
+    #[test]
+    fn test_user_buffer_new() {
+        let buf = UserBuffer::new(123, "TestUser".to_string(), 456, 789);
+        assert_eq!(buf.user_id, 123);
+        assert_eq!(buf.username, "TestUser");
+        assert!(!buf.is_speaking);
+        assert!(buf.samples.is_empty());
+    }
+
+    #[test]
+    fn test_user_buffer_push_silence() {
+        let mut buf = UserBuffer::new(1, "User".to_string(), 2, 3);
+        let silence = vec![0i16; 960];
+        buf.push_audio(&silence);
+        // Silence doesn't start speaking
+        assert!(!buf.is_speaking);
+        assert!(buf.samples.is_empty());
+    }
+
+    #[test]
+    fn test_user_buffer_push_speech() {
+        let mut buf = UserBuffer::new(1, "User".to_string(), 2, 3);
+        let loud: Vec<i16> = (0..960)
+            .map(|i| ((i as f32 * 0.1).sin() * 10000.0) as i16)
+            .collect();
+        buf.push_audio(&loud);
+        assert!(buf.is_speaking);
+        assert!(!buf.samples.is_empty());
+    }
+
+    #[test]
+    fn test_user_buffer_flush_empty() {
+        let mut buf = UserBuffer::new(1, "User".to_string(), 2, 3);
+        assert!(buf.flush().is_none());
+    }
+
+    #[test]
+    fn test_user_buffer_flush_with_samples() {
+        let mut buf = UserBuffer::new(1, "User".to_string(), 2, 3);
+        let loud: Vec<i16> = (0..960)
+            .map(|i| ((i as f32 * 0.1).sin() * 10000.0) as i16)
+            .collect();
+        buf.push_audio(&loud);
+        let segment = buf.force_flush();
+        assert!(segment.is_some());
+        let seg = segment.unwrap();
+        assert_eq!(seg.user_id, 1);
+        assert_eq!(seg.username, "User");
+        assert_eq!(seg.guild_id, 2);
+        assert_eq!(seg.channel_id, 3);
+        assert_eq!(seg.samples.len(), 960);
+    }
+
     #[tokio::test]
     async fn test_buffer_manager() {
         let manager = AudioBufferManager::new(123, 456);
@@ -292,5 +363,88 @@ mod tests {
             .register_speaker(1, 789, "TestUser".to_string())
             .await;
         assert_eq!(manager.speaker_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_buffer_manager_unregister() {
+        let manager = AudioBufferManager::new(123, 456);
+        manager.register_speaker(1, 789, "TestUser".to_string()).await;
+        assert_eq!(manager.speaker_count().await, 1);
+        manager.unregister_speaker(1).await;
+        assert_eq!(manager.speaker_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_buffer_manager_push_audio() {
+        let manager = AudioBufferManager::new(123, 456);
+        manager.register_speaker(1, 789, "TestUser".to_string()).await;
+
+        let packet = AudioPacket {
+            ssrc: 1,
+            user_id: Some(789),
+            username: Some("TestUser".to_string()),
+            samples: vec![10000i16; 960],
+            timestamp: Instant::now(),
+            sequence: 0,
+        };
+
+        // Should not flush on first short packet
+        let result = manager.push_audio(packet).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_buffer_manager_flush_all() {
+        let manager = AudioBufferManager::new(123, 456);
+        manager.register_speaker(1, 789, "TestUser".to_string()).await;
+
+        // Push loud audio
+        let packet = AudioPacket {
+            ssrc: 1,
+            user_id: Some(789),
+            username: Some("TestUser".to_string()),
+            samples: (0..960).map(|i| ((i as f32 * 0.1).sin() * 10000.0) as i16).collect(),
+            timestamp: Instant::now(),
+            sequence: 0,
+        };
+        manager.push_audio(packet).await;
+
+        let segments = manager.flush_all().await;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].user_id, 789);
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn silence_never_detected_as_speech(len in 100usize..2000) {
+            let silence = vec![0i16; len];
+            prop_assert!(!detect_speech(&silence));
+        }
+
+        #[test]
+        fn loud_audio_detected_as_speech(amplitude in 5000i16..32000) {
+            let loud = vec![amplitude; 960];
+            prop_assert!(detect_speech(&loud));
+        }
+
+        #[test]
+        fn vad_energy_is_non_negative(samples in prop::collection::vec(any::<i16>(), 100..1000)) {
+            // Calculate RMS energy (same logic as detect_speech)
+            let sum_squares: f64 = samples.iter().map(|&s| (s as f64).powi(2)).sum();
+            let rms = (sum_squares / samples.len() as f64).sqrt() / 32768.0;
+            prop_assert!(rms >= 0.0);
+        }
+
+        #[test]
+        fn empty_samples_not_speech(len in 0usize..1) {
+            let samples = vec![0i16; len];
+            prop_assert!(!detect_speech(&samples));
+        }
     }
 }

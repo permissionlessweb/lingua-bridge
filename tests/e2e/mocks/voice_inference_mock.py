@@ -50,10 +50,12 @@ class MockVoiceInference:
         """Mock text translation."""
         # Use same logic as text inference mock
         for scenario in self.scenarios.values():
-            if (scenario["input"].lower() in text.lower() and
-                scenario["source_lang"] == source_lang and
-                scenario["target_lang"] == target_lang):
-                return scenario["expected"]
+            # Handle both text scenarios (input) and voice scenarios (transcription)
+            input_text = scenario.get("input") or scenario.get("transcription", "")
+            if (input_text.lower() in text.lower() and
+                scenario.get("source_lang") == source_lang and
+                scenario.get("target_lang") == target_lang):
+                return scenario.get("expected", "")
 
         return f"[MOCK VOICE TRANSLATION] {text} ({source_lang} -> {target_lang})"
 
