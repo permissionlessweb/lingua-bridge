@@ -27,7 +27,7 @@ test-coverage: coverage-rust coverage-python
 
 # Rust coverage (requires cargo-tarpaulin)
 coverage-rust:
-    cargo tarpaulin --lib --skip-clean --out Html --out Lcov --output-dir target/coverage --ignore-tests --exclude-files "admin-cli/*"
+    cargo tarpaulin --lib --skip-clean --out Html --out Lcov --output-dir target/coverage --ignore-tests --exclude-files "admin-cli/*" "src/bot/*"
     open target/coverage/tarpaulin-report.html
 
 # Python coverage

@@ -207,4 +207,53 @@ mod tests {
         assert_eq!(config.endpoint("/translate"), "http://localhost:8000/translate");
         assert_eq!(config.endpoint("translate"), "http://localhost:8000/translate");
     }
+
+    #[test]
+    fn test_inference_endpoint_no_trailing_slash() {
+        let config = InferenceConfig {
+            url: "http://localhost:8000".to_string(),
+            model: "test".to_string(),
+            timeout_secs: 30,
+            max_retries: 3,
+        };
+        assert_eq!(config.endpoint("/translate"), "http://localhost:8000/translate");
+    }
+
+    #[test]
+    fn test_voice_config_default() {
+        let voice = VoiceConfig::default();
+        assert_eq!(voice.url, default_voice_url());
+        assert!(!voice.enable_tts_playback);
+        assert_eq!(voice.buffer_ms, default_buffer_ms());
+        assert_eq!(voice.vad_threshold, default_vad_threshold());
+        assert_eq!(voice.default_target_language, default_voice_target_lang());
+    }
+
+    #[test]
+    fn test_discord_config_default() {
+        let discord = DiscordConfig::default();
+        assert!(discord.application_id.is_none());
+    }
+
+    #[test]
+    fn test_load_from_default_config_file() {
+        let config = AppConfig::load();
+        assert!(config.is_ok(), "Failed to load config: {:?}", config.err());
+
+        let config = config.unwrap();
+        assert_eq!(config.admin.port, default_admin_port());
+        assert_eq!(config.admin.host, default_admin_host());
+    }
+
+    #[test]
+    fn test_load_voice_defaults_when_not_in_config() {
+        // Voice section is not in default.toml, so it should use Default impl
+        let config = AppConfig::load().unwrap();
+        assert_eq!(config.voice.url, default_voice_url());
+        assert!(!config.voice.enable_tts_playback);
+        assert_eq!(config.voice.buffer_ms, default_buffer_ms());
+        assert_eq!(config.voice.vad_threshold, default_vad_threshold());
+        assert_eq!(config.voice.default_target_language, default_voice_target_lang());
+    }
+
 }

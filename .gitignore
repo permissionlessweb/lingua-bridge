@@ -12,3 +12,5 @@ deploy-*.yaml
 __pycache__
 .pytest_cache
 .venv
+
+.opencode/plans

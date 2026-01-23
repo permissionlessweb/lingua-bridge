@@ -270,9 +270,11 @@ Moderators can configure the bot to post voice transcripts to Discord threads, c
 
 1. Join the voice channel you want to transcribe
 2. Run the command:
+
    ```
    /voice transcript enable:true text_channel:#transcripts languages:en,es,fr
    ```
+
 3. The bot creates threads for each language:
    - "Voice Translation - English"
    - "Voice Translation - Spanish"
@@ -667,6 +669,7 @@ Ensure the bot has Connect and Speak permissions in the voice channel. Check tha
 **Voice models fail to load**
 
 For speaker diarization, you need a HuggingFace token with pyannote license accepted:
+
 1. Visit <https://huggingface.co/pyannote/speaker-diarization-3.1>
 2. Accept the license
 3. Set `HF_TOKEN` environment variable
@@ -732,6 +735,43 @@ LinguaBridge uses a cryptographic provisioning system to protect sensitive crede
 5. **Memory Only**: Secrets are never written to disk and zeroized on drop
 
 This design ensures that even if an attacker gains access to the running container or deployment configuration, they cannot extract the Discord token or other secrets without the admin's private key.
+
+---
+
+## Web Viewer Architecture
+
+The web views use [Askama](https://github.com/djc/askama) templates with static CSS/JS files, giving proper separation of concerns while keeping the app predominantly Rust.
+
+```
+templates/                  ← Askama templates (compiled into the binary, type-checked)
+  web_view.html             ← Text channel translation viewer
+  voice_view.html           ← Voice channel transcription viewer
+static/                     ← Runtime-served files (editable without recompiling)
+  css/
+    common.css              ← Shared Discord-themed variables & base styles
+    web_view.css            ← Text view styles
+    voice_view.css          ← Voice view styles (audio controls, speaker avatars)
+  js/
+    websocket.js            ← Shared WebSocket connection with exponential backoff
+    web_view.js             ← Text message rendering + DOM management
+    voice_view.js           ← Voice messages + TTS audio queue
+  index.html                ← Landing page
+```
+
+### How it works
+
+1. **Askama templates** define the HTML structure and reference static assets via `<link>` / `<script src>`
+2. **Dynamic config** (session IDs, WebSocket URLs) is injected by Askama into a `window.__CONFIG` object
+3. **Static JS** reads `window.__CONFIG` at runtime — no inline scripts in the template
+4. **CSS/JS edits** take effect immediately (served by `tower_http::ServeDir`) — no Rust recompile needed
+5. **Template edits** (HTML structure) are validated at compile time by Askama
+
+### Modifying the views
+
+- **Styling**: Edit files in `static/css/`. Changes are live on next page load.
+- **Behavior**: Edit files in `static/js/`. The shared `websocket.js` provides `createWebSocket(url, { onMessage, onStatusChange })`.
+- **Structure**: Edit `templates/*.html`. Run `cargo chec` to verify template variables match the Rust struct.
+- **New template variables**: Update the corresponding struct in `src/web/routes.rs` or `src/web/voice_routes.rs`.
 
 ---
 
@@ -836,7 +876,19 @@ linguabridge/
 │   └── Dockerfile.voice    # Voice inference container
 ├── config/
 │   └── default.toml        # Default configuration
-└── static/                 # Web frontend assets
+├── templates/              # Askama HTML templates (compiled into binary)
+│   ├── web_view.html       # Text channel translation viewer
+│   └── voice_view.html     # Voice channel transcription viewer
+└── static/                 # Runtime-served web assets
+    ├── index.html          # Landing page
+    ├── css/
+    │   ├── common.css      # Shared Discord-themed styles
+    │   ├── web_view.css    # Text view styles
+    │   └── voice_view.css  # Voice view styles
+    └── js/
+        ├── websocket.js    # Shared WebSocket with reconnect
+        ├── web_view.js     # Text message rendering
+        └── voice_view.js   # Voice messages + TTS audio queue
 ```
 
 ### Key Technical Decisions
@@ -870,7 +922,7 @@ linguabridge/
 - **Adding new secrets**: Update `SecretsPayload` in both `src/admin/secrets.rs` and `admin-cli/src/main.rs`
 - **Changing config**: `src/config.rs` and `config/default.toml`
 - **Database schema**: `src/db/models.rs` for types, `src/db/queries.rs` for migrations + repos
-- **Voice web view UI**: `src/web/voice_routes.rs` contains the HTML template
+- **Web view UI**: `templates/` (HTML), `static/css/` (styles), `static/js/` (behavior), Rust structs in `src/web/routes.rs` and `src/web/voice_routes.rs`
 - **Voice result handling**: `src/voice/bridge.rs` routes results to web clients + Discord threads
 - **Discord thread transcripts**: `src/bot/commands/voice.rs` (transcript command) + `src/db/queries.rs` (VoiceTranscriptRepo)
 
@@ -977,3 +1029,8 @@ websocat ws://localhost:3000/voice/123456789/987654321/ws
 ```bash
 sqlite3 linguabridge.db "SELECT * FROM voice_transcript_settings;"
 ```
+
+## RESEARCH
+
+- <https://github.com/Discord-TTS/Bot>
+- <https://github.com/yewstack/yew>

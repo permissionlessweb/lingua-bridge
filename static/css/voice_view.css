@@ -1,0 +1,102 @@
+:root {
+    --voice: #3ba55d;
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.voice-icon {
+    color: var(--voice);
+    font-size: 1.25rem;
+}
+
+.audio-controls {
+    background: var(--bg-secondary);
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.audio-controls label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+
+.audio-controls input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.volume-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.volume-control input[type="range"] {
+    width: 100px;
+    cursor: pointer;
+}
+
+.queue-status {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
+.message {
+    border-left: 3px solid var(--voice);
+}
+
+.speaker-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.speaker-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.speaker-name {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.original {
+    font-style: italic;
+}
+
+.latency {
+    font-size: 0.625rem;
+    color: var(--text-secondary);
+    margin-left: 0.5rem;
+}

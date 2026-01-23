@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinguaBridge - Voice Translations</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/voice_view.css">
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <span class="voice-icon">&#128266;</span>
+            <h1>Voice Channel</h1>
+        </div>
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Connecting...</span>
+        </div>
+    </header>
+
+    <div class="audio-controls">
+        <label>
+            <input type="checkbox" id="ttsEnabled" checked>
+            <span>&#128266; TTS Audio</span>
+        </label>
+        <div class="volume-control">
+            <span>&#128264;</span>
+            <input type="range" id="volume" min="0" max="100" value="80">
+            <span id="volumeLabel">80%</span>
+        </div>
+        <div class="queue-status" id="queueStatus">Queue: 0</div>
+    </div>
+
+    <div id="messages">
+        <div class="empty-state" id="emptyState">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+            <p>Waiting for voice activity...</p>
+        </div>
+    </div>
+
+    <script>
+        window.__CONFIG = {
+            guildId: "{{ guild_id }}",
+            channelId: "{{ channel_id }}",
+            wsUrl: "{{ ws_url }}"
+        };
+    </script>
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/voice_view.js"></script>
+</body>
+</html>

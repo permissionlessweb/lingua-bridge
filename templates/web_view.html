@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinguaBridge - Live Translations</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/web_view.css">
+</head>
+<body>
+    <header>
+        <h1>LinguaBridge</h1>
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Connecting...</span>
+        </div>
+    </header>
+    <div id="messages">
+        <div class="empty-state" id="emptyState">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <p>Waiting for messages...</p>
+        </div>
+    </div>
+    <script>
+        window.__CONFIG = {
+            sessionId: "{{ session_id }}",
+            wsUrl: "{{ ws_url }}"
+        };
+    </script>
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/web_view.js"></script>
+</body>
+</html>
