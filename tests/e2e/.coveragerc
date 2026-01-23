@@ -4,6 +4,9 @@ omit =
     */__pycache__/*
     */test_*.py
     conftest.py
+    mocks/*
+    run_tests.py
+    web/__init__.py
 
 [report]
 exclude_lines =
