@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled("Clipboard", theme.text_primary_style().bold())),
         Line::from(Span::styled(
-            "  c  Copy mnemonic to clipboard",
+            "  c  Copy admin public key to clipboard",
             theme.text_primary_style(),
         )),
         Line::from(""),
@@ -127,6 +127,12 @@ pub fn render(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rect) {
             .as_deref()
             .unwrap_or("Not loaded");
         let balance_display = app.wallet_state.balance.as_deref().unwrap_or("N/A");
+        let public_key_display = app
+            .wallet_state
+            .wallet
+            .public_key
+            .as_deref()
+            .unwrap_or("Not generated");
 
         let status_style = if app.wallet_state.wallet.is_loaded() {
             Style::default().fg(theme.success)
@@ -160,6 +166,10 @@ pub fn render(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rect) {
             Line::from(Span::styled("Address", theme.text_primary_style().bold())),
             Line::from(""),
             Line::from(Span::styled(address_display, theme.text_primary_style())),
+            Line::from(""),
+            Line::from(Span::styled("Admin Public Key", theme.text_primary_style().bold())),
+            Line::from(""),
+            Line::from(Span::styled(public_key_display, theme.text_primary_style())),
             Line::from(""),
             Line::from(Span::styled("Balance", theme.text_primary_style().bold())),
             Line::from(""),

@@ -3,6 +3,7 @@ use bip39::Mnemonic;
 use cosmrs::bip32::DerivationPath;
 use cosmrs::crypto::secp256k1::SigningKey;
 use rand::RngCore;
+use base64::Engine;
 
 /// Cosmos SDK HD derivation path for Akash (coin type 118).
 const AKASH_HD_PATH: &str = "m/44'/118'/0'/0/0";
@@ -66,14 +67,16 @@ impl KeyGenerator {
         Ok(account_id.to_string())
     }
 
-    /// Create a wallet from a mnemonic: generates keypair + derives address.
+    /// Create a wallet from a mnemonic: generates keypair + derives address + encodes public key.
     pub fn create_wallet(&self, mnemonic: String) -> Result<Wallet, Box<dyn std::error::Error>> {
         let keypair = self.derive_keypair(&mnemonic)?;
         let address = self.derive_address(&keypair)?;
+        let public_key = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &keypair.public_key);
 
         Ok(Wallet {
             mnemonic: Some(mnemonic),
             address: Some(address),
+            public_key: Some(public_key),
         })
     }
 

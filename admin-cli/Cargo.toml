@@ -1,5 +1,5 @@
 [package]
-name = "linguabridge-admin"
+name = "admin-cli"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,7 +11,7 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 futures = "0.3"
 cosmrs = { version = "0.20", features = ["bip32"] }
 bip39 = { version = "2.2.2" }
-tonic = { version = "0.14.2" }
+tonic = { version = "0.14.2", features = ["transport", "tls-native-roots"] }
 prost = { version = "0.14.1", default-features = false, features = ["derive"] }
 linguabridge-types = { path = "../linguabridge-types", features = ["rpc"] }
 aes-gcm = "0.10"

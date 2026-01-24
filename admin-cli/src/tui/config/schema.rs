@@ -19,7 +19,8 @@ pub struct NetworkConfig {
 }
 
 /// Default gRPC endpoint for Akash mainnet queries.
-pub const DEFAULT_GRPC_URL: &str = "https://grpc.akashnet.net:443";
+/// Using Polkachu's public endpoint (known working)
+pub const DEFAULT_GRPC_URL: &str = "https://akash-grpc.polkachu.com:14490";
 
 impl Default for NetworkConfig {
     fn default() -> Self {

@@ -25,8 +25,10 @@ RUN mkdir -p src admin-cli/src linguabridge-types/src && \
 
 # Copy actual source code
 COPY src ./src
+COPY admin-cli/src ./admin-cli/src
 COPY linguabridge-types ./linguabridge-types
 COPY config ./config
+COPY templates ./templates
 
 # Build the actual application (only the bot, not admin-cli)
 RUN touch src/main.rs && cargo build --release -p linguabridge

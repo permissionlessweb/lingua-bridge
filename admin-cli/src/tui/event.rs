@@ -12,8 +12,8 @@ pub enum AppEvent {
     Tick,
     Quit,
     // Async operation results
-    WalletGenerated { mnemonic: String, address: String },
-    WalletImported { mnemonic: String, address: String },
+    WalletGenerated { mnemonic: String, address: String, public_key: String },
+    WalletImported { mnemonic: String, address: String, public_key: String },
     BalanceUpdated { amount: String, denom: String },
     BidsReceived { bids: Vec<BidInfo> },
     LeasesReceived { leases: Vec<LeaseInfo> },

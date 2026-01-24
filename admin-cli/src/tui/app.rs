@@ -346,26 +346,36 @@ impl App {
                 true
             }
             // Async results
-            AppEvent::WalletGenerated { mnemonic, address } => {
+            AppEvent::WalletGenerated { mnemonic, address, public_key } => {
                 self.wallet_state.wallet.mnemonic = Some(mnemonic.clone());
-                self.wallet_state.wallet.address = Some(address);
+                self.wallet_state.wallet.address = Some(address.clone());
+                self.wallet_state.wallet.public_key = Some(public_key.clone());
                 self.wallet_state.mnemonic_display = Some(mnemonic);
                 self.wallet_state.loading = false;
                 self.spinner.stop();
+
+                // Auto-populate the admin public key in SDL variables
+                self.auto_populate_admin_public_key(&public_key);
+
                 self.popup = Some(Popup::new(
                     PopupType::Mnemonic,
                     "Wallet Generated".to_string(),
-                    "Save your mnemonic securely! Press any key to dismiss.".to_string(),
+                    "Save your mnemonic securely! Press 'c' to copy, any other key to dismiss.".to_string(),
                 ));
                 self.popup.as_mut().unwrap().show();
                 true
             }
-            AppEvent::WalletImported { mnemonic, address } => {
+            AppEvent::WalletImported { mnemonic, address, public_key } => {
                 self.wallet_state.wallet.mnemonic = Some(mnemonic.clone());
-                self.wallet_state.wallet.address = Some(address);
+                self.wallet_state.wallet.address = Some(address.clone());
+                self.wallet_state.wallet.public_key = Some(public_key.clone());
                 self.wallet_state.mnemonic_display = Some(mnemonic);
                 self.wallet_state.loading = false;
                 self.spinner.stop();
+
+                // Auto-populate the admin public key in SDL variables
+                self.auto_populate_admin_public_key(&public_key);
+
                 self.status_message = Some(("Wallet imported successfully".to_string(), false));
                 true
             }
@@ -470,10 +480,40 @@ impl App {
         let popup_type = self.popup.as_ref().map(|p| match p.popup_type {
             PopupType::DeployConfirm => "deploy_confirm",
             PopupType::FeeGrantNeeded => "fee_grant_needed",
+            PopupType::Mnemonic => "mnemonic",
             _ => "generic",
         });
 
         match popup_type.as_deref() {
+            Some("mnemonic") => {
+                match key.code {
+                    KeyCode::Char('c') => {
+                        // Copy mnemonic to clipboard
+                        if let Some(ref mnemonic) = self.wallet_state.mnemonic_display {
+                            match arboard::Clipboard::new() {
+                                Ok(mut clipboard) => {
+                                    match clipboard.set_text(mnemonic.clone()) {
+                                        Ok(_) => {
+                                            self.status_message = Some(("Mnemonic copied to clipboard".to_string(), false));
+                                        }
+                                        Err(e) => {
+                                            self.status_message = Some((format!("Clipboard write failed: {}", e), true));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    self.status_message = Some((format!("Clipboard unavailable: {}", e), true));
+                                }
+                            }
+                        }
+                        // Keep popup open after copying
+                    }
+                    _ => {
+                        // Dismiss on any other key
+                        self.popup = None;
+                    }
+                }
+            }
             Some("deploy_confirm") => {
                 match key.code {
                     KeyCode::Enter => {
@@ -660,7 +700,7 @@ impl App {
             Screen::Wallet => match key.code {
                 KeyCode::Char('g') => self.generate_wallet(),
                 KeyCode::Char('i') => self.start_mnemonic_import(),
-                KeyCode::Char('c') => self.copy_mnemonic_to_clipboard(),
+                KeyCode::Char('c') => self.copy_public_key_to_clipboard(),
                 KeyCode::Char('s') => self.save_wallet_encrypted(),
                 KeyCode::Char('l') => self.load_wallet_encrypted(),
                 KeyCode::Char('r') => self.refresh_balance(),
@@ -965,6 +1005,7 @@ impl App {
                                 let _ = tx.send(AppEvent::WalletGenerated {
                                     mnemonic: wallet.mnemonic.clone().unwrap_or_default(),
                                     address: wallet.address.clone().unwrap_or_default(),
+                                    public_key: wallet.public_key.clone().unwrap_or_default(),
                                 });
                             }
                             Err(e) => {
@@ -986,13 +1027,13 @@ impl App {
         }
     }
 
-    fn copy_mnemonic_to_clipboard(&mut self) {
-        if let Some(ref mnemonic) = self.wallet_state.wallet.mnemonic {
+    fn copy_public_key_to_clipboard(&mut self) {
+        if let Some(ref public_key) = self.wallet_state.wallet.public_key {
             match arboard::Clipboard::new() {
                 Ok(mut clipboard) => {
-                    match clipboard.set_text(mnemonic.clone()) {
+                    match clipboard.set_text(public_key.clone()) {
                         Ok(_) => {
-                            self.status_message = Some(("Mnemonic copied to clipboard".to_string(), false));
+                            self.status_message = Some(("Admin public key copied to clipboard".to_string(), false));
                         }
                         Err(e) => {
                             self.status_message = Some((format!("Clipboard write failed: {}", e), true));
@@ -1004,7 +1045,20 @@ impl App {
                 }
             }
         } else {
-            self.status_message = Some(("No mnemonic to copy — generate first".to_string(), true));
+            self.status_message = Some(("No public key available — generate wallet first".to_string(), true));
+        }
+    }
+
+    fn auto_populate_admin_public_key(&mut self, public_key: &str) {
+        // Auto-populate YOUR_ADMIN_PUBLIC_KEY in SDL if it exists
+        if let Some(ref mut sdl) = self.deployment_state.sdl {
+            for var in &mut sdl.variables {
+                if var.name == "YOUR_ADMIN_PUBLIC_KEY" && var.value.is_empty() {
+                    var.value = public_key.to_string();
+                    self.status_message = Some(("Admin public key auto-populated in deployment config".to_string(), false));
+                    break;
+                }
+            }
         }
     }
 
@@ -1043,6 +1097,7 @@ impl App {
                             let _ = tx.send(AppEvent::WalletGenerated {
                                 mnemonic: wallet.mnemonic.clone().unwrap_or_default(),
                                 address: wallet.address.clone().unwrap_or_default(),
+                                public_key: wallet.public_key.clone().unwrap_or_default(),
                             });
                         }
                         Err(e) => {
@@ -1518,6 +1573,7 @@ impl App {
                         let _ = tx.send(AppEvent::WalletImported {
                             mnemonic: wallet.mnemonic.clone().unwrap_or_default(),
                             address: wallet.address.clone().unwrap_or_default(),
+                            public_key: wallet.public_key.clone().unwrap_or_default(),
                         });
                     }
                     Err(e) => {

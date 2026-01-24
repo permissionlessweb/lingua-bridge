@@ -3,10 +3,11 @@ pub mod signer;
 
 use zeroize::Zeroize;
 
-/// Wallet holds the mnemonic and derived address.
+/// Wallet holds the mnemonic, derived address, and admin public key.
 pub struct Wallet {
     pub mnemonic: Option<String>,
     pub address: Option<String>,
+    pub public_key: Option<String>, // base64-encoded compressed secp256k1 public key
 }
 
 impl Wallet {
@@ -14,6 +15,7 @@ impl Wallet {
         Self {
             mnemonic: None,
             address: None,
+            public_key: None,
         }
     }
 
