@@ -14,9 +14,9 @@ use crate::tui::widgets::{Form, LogViewer, Popup, PopupType, Spinner};
 /// Top-level tab for the TUI
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MainTab {
-    Deployments, // Dashboard of existing deployed bots
+    Wallet,      // Wallet management (MUST BE FIRST - required before deployment)
     Deploy,      // New deployment wizard
-    Wallet,      // Wallet management
+    Deployments, // Dashboard of existing deployed bots
 }
 
 /// Sub-screen within the Deploy tab (wizard steps)
@@ -228,13 +228,8 @@ impl App {
             .and_then(|store| store.load_config().ok())
             .unwrap_or_default();
 
-        // Detect if we have existing deployments to determine startup tab
-        let has_deployments = !config.deployments.is_empty();
-        let initial_tab = if has_deployments {
-            MainTab::Deployments
-        } else {
-            MainTab::Deploy
-        };
+        // Always start with Wallet tab (required before deployment)
+        let initial_tab = MainTab::Wallet;
 
         Self {
             current_screen: Screen::Splash,
@@ -376,7 +371,11 @@ impl App {
                 // Auto-populate the admin public key in SDL variables
                 self.auto_populate_admin_public_key(&public_key);
 
-                self.status_message = Some(("Wallet imported successfully".to_string(), false));
+                self.status_message = Some(("Wallet imported successfully - loading balance...".to_string(), false));
+
+                // Automatically refresh balance on fresh import
+                self.refresh_balance();
+
                 true
             }
             AppEvent::BalanceUpdated { amount, denom } => {
@@ -566,9 +565,9 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             // Tab switching: 1/2/3
-            KeyCode::Char('1') => self.switch_tab(MainTab::Deployments),
+            KeyCode::Char('1') => self.switch_tab(MainTab::Wallet),
             KeyCode::Char('2') => self.switch_tab(MainTab::Deploy),
-            KeyCode::Char('3') => self.switch_tab(MainTab::Wallet),
+            KeyCode::Char('3') => self.switch_tab(MainTab::Deployments),
             // Sub-screen navigation within current tab
             KeyCode::Tab => self.next_step(),
             KeyCode::BackTab => self.prev_step(),
@@ -1124,16 +1123,29 @@ impl App {
             let grpc_url = self.config.network.grpc_url.clone();
             tokio::spawn(async move {
                 let client = AkashClient::new(rpc_url, grpc_url);
-                match client.query_balance(&addr).await {
-                    Ok(balance) => {
+
+                // Add timeout to prevent stuck loading
+                let balance_query = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    client.query_balance(&addr)
+                );
+
+                match balance_query.await {
+                    Ok(Ok(balance)) => {
                         let _ = tx.send(AppEvent::BalanceUpdated {
                             amount: balance.amount,
                             denom: balance.denom,
                         });
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         let _ = tx.send(AppEvent::StatusMessage {
                             message: format!("Balance query failed: {}", e),
+                            is_error: true,
+                        });
+                    }
+                    Err(_) => {
+                        let _ = tx.send(AppEvent::StatusMessage {
+                            message: "Balance query timed out after 10 seconds".to_string(),
                             is_error: true,
                         });
                     }

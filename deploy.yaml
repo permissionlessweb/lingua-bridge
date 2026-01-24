@@ -49,6 +49,11 @@ services:
         as: 8000
         to:
           - service: bot
+    params:
+      storage:
+        data:
+          mount: /root/.cache
+          readOnly: false
 
   # LinguaBridge Discord bot and web server (CPU only)
   # Base: debian:trixie-slim, Rust binary
@@ -97,25 +102,26 @@ services:
 
 profiles:
   compute:
-    # Unified inference service (text + voice translation on single GPU)
-    # Memory increased to accommodate all models: TranslateGemma + STT + TTS
     inference:
       resources:
         cpu:
-          units: 4
+          units: 8
         memory:
-          size: 32Gi
+          size: 128Gi
         storage:
-          size: 40Gi
+          - size: 50Gi
+          - name: data
+            size: 200Gi
+            attributes:
+              persistent: true
+              class: beta3
         gpu:
-          units: 1
+          units: 2
           attributes:
             vendor:
               nvidia:
-                - model: rtx3090
-                - model: rtx4090
                 - model: a100
-
+                - model: h100
     bot:
       resources:
         cpu:
@@ -123,30 +129,21 @@ profiles:
         memory:
           size: 512Mi
         storage:
-          - name: default
-            size: 1Gi
+          - size: 1Gi
           - name: data
             size: 1Gi
             attributes:
               persistent: true
               class: beta3
-
   placement:
     dcloud:
-      attributes:
-        host: akash
-      signedBy:
-        anyOf:
-          - akash1365ez3m5ess395e8fs2zyzgqvxhfr3vqwcpqp7
-          - akash18qa2a2ltfyvkyj0ggj3hkvuj6twzyumuaru9s4
       pricing:
         inference:
           denom: uakt
-          amount: 15000
+          amount: 1000000
         bot:
           denom: uakt
-          amount: 1000
-
+          amount: 50000
 deployment:
   inference:
     dcloud:

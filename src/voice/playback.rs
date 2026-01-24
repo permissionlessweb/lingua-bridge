@@ -2,10 +2,15 @@
 
 use super::types::VoiceInferenceResponse;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use songbird::{tracks::TrackHandle, Call};
+use songbird::{
+    input::{Input, RawAdapter},
+    tracks::TrackHandle,
+    Call,
+};
+use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Playback manager for TTS audio.
 pub struct PlaybackManager {
@@ -165,34 +170,189 @@ pub async fn run_playback_loop(
 }
 
 /// Play TTS audio through the voice connection.
+///
+/// # Audio Pipeline
+///
+/// This function handles the complete audio pipeline from TTS output to Discord playback:
+///
+/// 1. **Input**: Mono PCM i16 samples at variable sample rate (typically 24kHz from CosyVoice)
+/// 2. **Resampling**: Convert to 48kHz using linear interpolation (Discord requirement)
+/// 3. **Channel conversion**: Duplicate mono to stereo (Discord requirement)
+/// 4. **Encoding**: Songbird handles Opus encoding automatically
+/// 5. **Playback**: Stream to Discord voice channel
+///
+/// # Discord Audio Requirements
+///
+/// - Sample rate: 48kHz (hardcoded in Discord's Opus configuration)
+/// - Channels: Stereo (2 channels)
+/// - Format: 16-bit signed PCM (Songbird converts to Opus)
+/// - Frame size: 20ms (960 samples per channel at 48kHz)
+///
+/// # Performance Notes
+///
+/// - Linear interpolation resampling is fast but lower quality than sinc/polyphase
+/// - For better quality, consider using the `rubato` crate for professional resampling
+/// - Current implementation loads entire audio into memory (fine for short TTS clips)
+/// - For longer audio, consider streaming/chunked processing
 async fn play_tts_audio(
     call: &Arc<tokio::sync::Mutex<Call>>,
     item: &TTSPlaybackItem,
 ) -> Result<(), PlaybackError> {
-    info!(user = item.username, text = item.text, "Playing TTS audio");
-
-    // Convert i16 samples to f32 for songbird
-    let samples_f32: Vec<f32> = item.audio.iter().map(|&s| s as f32 / 32768.0).collect();
-
-    // Create a simple PCM input
-    // Songbird expects stereo, so we'll duplicate mono to stereo
-    let stereo_samples: Vec<f32> = samples_f32.iter().flat_map(|&s| [s, s]).collect();
-
-    // For now, we'll use a simple approach
-    // In production, you'd want proper audio streaming
-    let _call = call.lock().await;
-
-    // Songbird's Input system is complex; this is a simplified placeholder
-    // The actual implementation would use Input::new() with proper audio source
-    // TODO: Implement proper audio streaming with songbird's Input API
-
-    debug!(
-        samples = stereo_samples.len(),
+    info!(
+        user = item.username,
+        text = item.text,
+        samples = item.audio.len(),
         sample_rate = item.sample_rate,
-        "TTS playback complete"
+        "Playing TTS audio"
     );
 
+    if item.audio.is_empty() {
+        return Err(PlaybackError::NoAudio);
+    }
+
+    // Discord voice requires 48kHz stereo PCM (Songbird handles Opus encoding)
+    const DISCORD_SAMPLE_RATE: u32 = 48000;
+
+    // Prepare audio data: resample to 48kHz and convert to stereo
+    let stereo_48k = prepare_audio_for_discord(&item.audio, item.sample_rate)?;
+
+    // Convert i16 stereo samples to bytes (little-endian PCM)
+    let audio_bytes: Vec<u8> = stereo_48k
+        .iter()
+        .flat_map(|&sample| sample.to_le_bytes())
+        .collect();
+
+    debug!(
+        original_samples = item.audio.len(),
+        resampled_samples = stereo_48k.len(),
+        bytes = audio_bytes.len(),
+        "Audio prepared for playback"
+    );
+
+    // Create an in-memory cursor for the audio data
+    let cursor = Cursor::new(audio_bytes);
+
+    // Create Songbird input from raw PCM data
+    // RawAdapter: stereo 16-bit signed PCM at 48kHz
+    let input = Input::from(RawAdapter::new(
+        cursor,
+        DISCORD_SAMPLE_RATE,
+        2, // stereo channels
+    ));
+
+    // Play the audio through the voice connection
+    let mut handler = call.lock().await;
+    let track_handle = handler.play_input(input);
+
+    // Wait for the track to finish playing
+    let duration_secs = stereo_48k.len() as f64 / (DISCORD_SAMPLE_RATE as f64 * 2.0);
+    debug!(duration_secs = duration_secs, "Waiting for playback to complete");
+
+    // Release the lock while waiting
+    drop(handler);
+
+    // Wait for playback to complete (with a small buffer)
+    let wait_duration = std::time::Duration::from_secs_f64(duration_secs + 0.5);
+    tokio::time::sleep(wait_duration).await;
+
+    // Check if track finished successfully
+    if let Err(e) = track_handle.get_info().await {
+        warn!(error = ?e, "Failed to get track info");
+    }
+
+    debug!("TTS playback complete");
     Ok(())
+}
+
+/// Prepare audio for Discord: resample to 48kHz and convert to stereo.
+fn prepare_audio_for_discord(
+    mono_samples: &[i16],
+    source_sample_rate: u32,
+) -> Result<Vec<i16>, PlaybackError> {
+    const DISCORD_SAMPLE_RATE: u32 = 48000;
+
+    // First, resample to 48kHz if needed
+    let resampled = if source_sample_rate != DISCORD_SAMPLE_RATE {
+        resample_audio(mono_samples, source_sample_rate, DISCORD_SAMPLE_RATE)
+    } else {
+        mono_samples.to_vec()
+    };
+
+    // Convert mono to stereo by duplicating each sample
+    let stereo: Vec<i16> = resampled.iter().flat_map(|&s| [s, s]).collect();
+
+    Ok(stereo)
+}
+
+/// Simple linear interpolation resampling.
+///
+/// This uses basic linear interpolation which is fast but lower quality than
+/// professional resampling algorithms (sinc, polyphase, etc.). For TTS playback
+/// the quality is generally acceptable.
+///
+/// # Algorithm
+///
+/// For each output sample position:
+/// 1. Calculate corresponding position in input samples
+/// 2. If between two samples, linearly interpolate
+/// 3. If at last sample, use that sample directly
+///
+/// # Production Improvements
+///
+/// For better quality, consider using:
+/// - `rubato` crate: High-quality resampling with various algorithms
+/// - `samplerate` crate: libsamplerate bindings (sinc interpolation)
+/// - `dasp` crate: Digital audio signal processing primitives
+///
+/// # Example
+///
+/// ```ignore
+/// // Upsample 24kHz to 48kHz (2x)
+/// let input = vec![100i16, 200, 300];
+/// let output = resample_audio(&input, 24000, 48000);
+/// // output will have ~6 samples with interpolated values
+/// ```
+fn resample_audio(samples: &[i16], from_rate: u32, to_rate: u32) -> Vec<i16> {
+    // No-op if rates match
+    if from_rate == to_rate {
+        return samples.to_vec();
+    }
+
+    // Handle empty input
+    if samples.is_empty() {
+        return Vec::new();
+    }
+
+    let ratio = to_rate as f64 / from_rate as f64;
+    let output_len = (samples.len() as f64 * ratio).ceil() as usize;
+    let mut output = Vec::with_capacity(output_len);
+
+    for i in 0..output_len {
+        let src_pos = i as f64 / ratio;
+        let src_idx = src_pos as usize;
+
+        if src_idx + 1 < samples.len() {
+            // Linear interpolation between two samples
+            let frac = src_pos - src_idx as f64;
+            let sample1 = samples[src_idx] as f64;
+            let sample2 = samples[src_idx + 1] as f64;
+            let interpolated = sample1 + (sample2 - sample1) * frac;
+
+            // Clamp to i16 range to prevent overflow
+            let clamped = interpolated.clamp(i16::MIN as f64, i16::MAX as f64);
+            output.push(clamped as i16);
+        } else if src_idx < samples.len() {
+            // Last sample, no interpolation needed
+            output.push(samples[src_idx]);
+        } else {
+            // Shouldn't happen, but handle gracefully
+            if let Some(&last) = samples.last() {
+                output.push(last);
+            }
+        }
+    }
+
+    output
 }
 
 /// Playback errors.
@@ -201,8 +361,11 @@ pub enum PlaybackError {
     #[error("No audio data")]
     NoAudio,
 
-    #[error("Invalid audio format")]
-    InvalidFormat,
+    #[error("Invalid audio format: {0}")]
+    InvalidFormat(String),
+
+    #[error("Resampling failed: unsupported sample rate conversion {from}Hz -> {to}Hz")]
+    UnsupportedSampleRate { from: u32, to: u32 },
 
     #[error("Playback failed: {0}")]
     Failed(String),
@@ -243,5 +406,53 @@ mod tests {
         let next = manager.next().await;
         assert!(next.is_some());
         assert_eq!(manager.queue_len().await, 0);
+    }
+
+    #[test]
+    fn test_resample_audio() {
+        // Test 2x upsampling (24kHz -> 48kHz)
+        let input = vec![100i16, 200, 300, 400];
+        let output = resample_audio(&input, 24000, 48000);
+
+        // Should have ~2x samples
+        assert_eq!(output.len(), 8);
+
+        // First sample should be the same
+        assert_eq!(output[0], 100);
+
+        // Check interpolation works
+        assert!(output[1] > 100 && output[1] < 200);
+    }
+
+    #[test]
+    fn test_resample_audio_same_rate() {
+        // Test no-op when rates are the same
+        let input = vec![100i16, 200, 300];
+        let output = resample_audio(&input, 48000, 48000);
+
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn test_prepare_audio_for_discord() {
+        let mono = vec![100i16, 200, 300];
+        let result = prepare_audio_for_discord(&mono, 48000).unwrap();
+
+        // Mono -> Stereo: each sample duplicated
+        assert_eq!(result.len(), 6);
+        assert_eq!(result[0], 100);
+        assert_eq!(result[1], 100); // duplicated
+        assert_eq!(result[2], 200);
+        assert_eq!(result[3], 200); // duplicated
+    }
+
+    #[test]
+    fn test_prepare_audio_with_resampling() {
+        let mono = vec![100i16, 200, 300, 400];
+        let result = prepare_audio_for_discord(&mono, 24000).unwrap();
+
+        // 24kHz -> 48kHz = 2x samples, then stereo = 2x again = 4x total
+        // 4 samples * 2 (resample) * 2 (stereo) = 16 samples
+        assert_eq!(result.len(), 16);
     }
 }

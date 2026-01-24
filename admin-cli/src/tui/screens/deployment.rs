@@ -3,6 +3,7 @@ use ratatui::widgets::*;
 use crate::tui::app::{App, DeployPanel};
 use crate::tui::input::InputMode;
 use crate::tui::theme::AkashTheme;
+use crate::tui::ui::centered_rect;
 
 pub fn render(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rect) {
     let layout = Layout::default()
@@ -330,24 +331,4 @@ fn render_gpu_picker(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rec
                 .border_style(theme.primary_style()),
         );
     frame.render_widget(picker, popup_area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(area);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }

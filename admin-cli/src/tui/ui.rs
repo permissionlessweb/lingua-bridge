@@ -90,9 +90,9 @@ fn render_header(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rect) {
 
 fn render_tab_bar(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rect) {
     let tabs = vec![
-        ("1:Bots", MainTab::Deployments),
+        ("1:Wallet", MainTab::Wallet),
         ("2:Deploy", MainTab::Deploy),
-        ("3:Wallet", MainTab::Wallet),
+        ("3:Bots", MainTab::Deployments),
     ];
 
     let mut spans = Vec::new();
@@ -193,19 +193,27 @@ fn render_footer(frame: &mut Frame, theme: &AkashTheme, app: &App, area: Rect) {
 
 fn render_spinner(frame: &mut Frame, theme: &AkashTheme, app: &App) {
     let area = frame.area();
-    let popup_area = centered_rect(40, 3, area);
+    let popup_area = centered_rect(50, 15, area);
 
     frame.render_widget(Clear, popup_area);
 
     let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let ch = spinner_chars[app.spinner.frame % spinner_chars.len()];
-    let text = format!("{} {}", ch, app.spinner.message);
 
-    let widget = Paragraph::new(text)
-        .style(theme.text_primary_style())
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{} {}", ch, app.spinner.message),
+            theme.text_primary_style().bold(),
+        )),
+        Line::from(""),
+    ];
+
+    let widget = Paragraph::new(lines)
         .alignment(Alignment::Center)
         .block(
             Block::default()
+                .title(" Loading ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.info)),
         );
@@ -305,7 +313,7 @@ fn render_popup(frame: &mut Frame, theme: &AkashTheme, app: &App) {
 }
 
 /// Helper to create a centered rect of given percentage width/height
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

@@ -300,12 +300,12 @@ Uses the existing text inference service (shared with text channel translation).
 | `device` | `cuda` | Compute device |
 | `torch_dtype` | `bfloat16` | Tensor precision |
 
-**Source:** `inference/voice_service.py:97-106`
+**Source:** `inference/unified_inference.py:97-106`
 
 ### Translation Flow
 
 ```python
-# inference/voice_service.py:276-289
+# inference/unified_inference.py:276-289
 if source_language != target_language and translator is not None:
     translated_text = translator.translate(
         original_text,
@@ -549,7 +549,7 @@ CREATE TABLE voice_channel_settings (
 | `src/db/queries.rs` | VoiceTranscriptRepo CRUD operations |
 | `inference/voice/stt.py` | Distil-Whisper engine |
 | `inference/voice/tts.py` | CosyVoice/edge-tts engine |
-| `inference/voice_service.py` | WebSocket server |
+| `inference/unified_inference.py` | WebSocket server |
 | `src/config.rs` | VoiceConfig definition |
 
 ---

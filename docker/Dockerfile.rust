@@ -39,6 +39,7 @@ FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    libopus0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
