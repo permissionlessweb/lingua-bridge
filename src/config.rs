@@ -98,7 +98,7 @@ pub struct VoiceConfig {
 }
 
 fn default_voice_url() -> String {
-    "ws://voice-inference:8001/voice".to_string()
+    "ws://inference:8000/voice".to_string()
 }
 
 fn default_buffer_ms() -> u32 {

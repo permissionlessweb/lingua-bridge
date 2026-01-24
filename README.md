@@ -409,23 +409,19 @@ If you prefer to build manually:
 # Build bot image
 docker build -f docker/Dockerfile.rust -t linguabridge-bot:v1.0.0 .
 
-# Build inference image
-docker build -f docker/Dockerfile.inference -t linguabridge-inference:v1.0.0 .
-
-# Build voice inference image
-docker build -f docker/Dockerfile.voice -t linguabridge-voice:v1.0.0 .
+# Build unified inference image (text + voice translation on single GPU)
+docker build -f docker/Dockerfile.unified -t linguabridge-unified:v2.0.0 .
 
 # Tag for GHCR (replace YOUR_ORG with your org or username)
 docker tag linguabridge-bot:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
-docker tag linguabridge-inference:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
-docker tag linguabridge-voice:v1.0.0 ghcr.io/YOUR_ORG/linguabridge-voice:v1.0.0
+docker tag linguabridge-unified:v2.0.0 ghcr.io/YOUR_ORG/linguabridge-unified:v2.0.0
 
 # Login (use your personal username, even for org pushes)
 docker login ghcr.io -u YOUR_USERNAME
 
 # Push to org namespace
 docker push ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
-docker push ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
+docker push ghcr.io/YOUR_ORG/linguabridge-unified:v2.0.0
 ```
 
 ### Update deploy.yaml
@@ -435,9 +431,7 @@ After pushing, update `deploy.yaml` with your image references:
 ```yaml
 services:
   inference:
-    image: ghcr.io/YOUR_ORG/linguabridge-inference:v1.0.0
-  voice-inference:
-    image: ghcr.io/YOUR_ORG/linguabridge-voice:v1.0.0
+    image: ghcr.io/YOUR_ORG/linguabridge-unified:v2.0.0
   bot:
     image: ghcr.io/YOUR_ORG/linguabridge-bot:v1.0.0
 ```
@@ -545,7 +539,7 @@ This ensures that even Akash providers with access to your container cannot extr
 | `LINGUABRIDGE_WEB__PORT` | `3000` | Web server port |
 | `LINGUABRIDGE_WEB__PUBLIC_URL` | `http://localhost:3000` | Public URL for links |
 | `LINGUABRIDGE_DATABASE__URL` | `sqlite://linguabridge.db` | Database connection |
-| `LINGUABRIDGE_VOICE__URL` | `ws://voice-inference:8001/voice` | Voice inference WebSocket |
+| `LINGUABRIDGE_VOICE__URL` | `ws://inference:8000/voice` | Voice inference WebSocket |
 | `LINGUABRIDGE_VOICE__ENABLE_TTS_PLAYBACK` | `false` | Play TTS in Discord voice |
 | `LINGUABRIDGE_VOICE__BUFFER_MS` | `500` | Audio buffer size (ms) |
 | `LINGUABRIDGE_VOICE__VAD_THRESHOLD` | `0.5` | VAD sensitivity (0.0-1.0) |
@@ -560,26 +554,28 @@ This ensures that even Akash providers with access to your container cannot extr
 | `google/translategemma-12b-it` | ~24GB | Medium | Better |
 | `google/translategemma-27b-it` | ~54GB | Slower | Best |
 
-### Voice Inference Service
+### Unified Inference Service
 
-The voice inference service runs separately and requires its own configuration:
+The unified inference service combines text and voice translation on a single GPU:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEVICE` | `cuda` | Compute device (cuda/cpu) |
+| `TRANSLATEGEMMA_MODEL` | `google/translategemma-4b-it` | Translation model |
 | `STT_MODEL` | `distil-large-v3` | Whisper model for speech-to-text |
 | `TTS_MODEL` | `CosyVoice2-0.5B` | Model for text-to-speech |
+| `ENABLE_STT` | `true` | Enable speech-to-text |
 | `ENABLE_TTS` | `true` | Enable TTS synthesis |
 | `ENABLE_DIARIZATION` | `false` | Speaker diarization (requires HF token) |
 | `HF_TOKEN` | (optional) | HuggingFace token for pyannote models |
 | `HOST` | `0.0.0.0` | Service bind address |
-| `PORT` | `8001` | Service port |
+| `PORT` | `8000` | Service port |
 
 **Resource Requirements:**
 
 | Service | VRAM | RAM | Notes |
 |---------|------|-----|-------|
-| Voice Inference | ~16-24GB | 24GB | STT + Translation + TTS models |
+| Unified Inference | ~24-32GB | 32GB | Translation + STT + TTS models on single GPU |
 
 ---
 
@@ -668,8 +664,8 @@ Ensure the bot has Connect and Speak permissions in the voice channel. Check tha
 
 **No transcription appearing**
 
-1. Check voice inference service is running: `curl http://localhost:8001/health`
-2. Verify `LINGUABRIDGE_VOICE__URL` points to the correct WebSocket endpoint
+1. Check unified inference service is running: `curl http://localhost:8000/health`
+2. Verify `LINGUABRIDGE_VOICE__URL` points to the correct WebSocket endpoint (`ws://inference:8000/voice`)
 3. Check bot logs for "Failed to send audio to inference" errors
 
 **Voice models fail to load**
@@ -697,11 +693,12 @@ For speaker diarization, you need a HuggingFace token with pyannote license acce
                                               |
                       +-----------------------+------------------------+
                       |                       |                        |
-             +--------+--------+    +---------+---------+    +---------+--------+
-             | Text Inference  |    | Voice Inference   |    |   Web Server     |
-             | (Python/FastAPI)|    | (Python/WebSocket)|    |   (Axum)         |
-             | Port 8000       |    | Port 8001         |    |   Port 3000      |
-             +-----------------+    +-------------------+    +--------+---------+
+             +------------------------+    +---------+--------+
+             | Unified Inference      |    |   Web Server     |
+             | (Python/FastAPI+WS)    |    |   (Axum)         |
+             | Port 8000 (REST+WS)    |    |   Port 3000      |
+             | Text + Voice on 1 GPU  |    |                  |
+             +------------------------+    +--------+---------+
                                                                       |
                                               +-----------------------+
                                               |                       |
@@ -878,8 +875,7 @@ linguabridge/
 ├── docker/
 │   ├── docker-compose.yml  # Multi-container deployment
 │   ├── Dockerfile.rust     # Bot container
-│   ├── Dockerfile.inference # Text inference container
-│   └── Dockerfile.voice    # Voice inference container
+│   └── Dockerfile.unified  # Unified inference container (text + voice)
 ├── config/
 │   └── default.toml        # Default configuration
 ├── templates/              # Askama HTML templates (compiled into binary)
@@ -901,7 +897,7 @@ linguabridge/
 
 1. **Python sidecar for inference**: Candle (Rust ML) doesn't support Gemma 3 architecture yet. Python sidecar uses transformers library.
 
-2. **Separate voice inference service**: Voice processing requires additional models (Whisper, CosyVoice) that benefit from dedicated GPU memory management. WebSocket streaming enables low-latency audio processing.
+2. **Unified inference service**: Text and voice translation share a single GPU, loading TranslateGemma once in memory. The unified service exposes both REST (text translation) and WebSocket (voice translation) endpoints, reducing deployment complexity and GPU costs.
 
 3. **Secure admin transport**: Environment variables expose secrets on decentralized platforms (Akash). Cryptographic provisioning solves this:
    - Ed25519 for admin authentication
@@ -986,16 +982,13 @@ Key Python packages (voice):
 **Run the full stack locally:**
 
 ```bash
-# Terminal 1: Text Inference
-cd inference && python main.py
+# Terminal 1: Unified Inference (text + voice)
+cd inference && python unified_inference.py
 
-# Terminal 2: Voice Inference
-cd inference && python voice_service.py
-
-# Terminal 3: Bot
+# Terminal 2: Bot
 cargo run
 
-# Terminal 4: Provision
+# Terminal 3: Provision
 cargo run -p admin-cli -- provision --bot-url http://localhost:9999 --discord-token $TOKEN --admin-key admin.key
 ```
 
@@ -1013,11 +1006,11 @@ curl http://localhost:9999/pubkey
 # {"public_key":"base64..."}
 ```
 
-**Check voice inference service:**
+**Check unified inference service:**
 
 ```bash
-curl http://localhost:8001/health
-# {"status":"ok","stt_loaded":true,"tts_loaded":true,...}
+curl http://localhost:8000/health
+# {"status":"ok","model_loaded":true,"stt_loaded":true,"tts_loaded":true,...}
 ```
 
 **Test voice web view locally:**

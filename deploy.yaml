@@ -1,6 +1,7 @@
 # LinguaBridge Akash Network Deployment
 #
-# Three-tier architecture: text inference (GPU), voice inference (GPU), bot (CPU).
+# Two-tier architecture: unified inference (GPU), bot (CPU).
+# The unified inference service provides both text and voice translation on a single GPU.
 #
 # Before deploying:
 # 1. Generate admin keys: cargo run -p admin-cli -- keygen
@@ -18,10 +19,12 @@
 version: "2.0"
 
 services:
-  # TranslateGemma inference service (GPU required)
+  # Unified inference service (GPU required)
+  # Provides both REST API (text translation) and WebSocket (voice translation)
   # Base: nvidia/cuda:12.4.1-runtime-ubuntu22.04, Python 3.11
+  # Models: TranslateGemma (translation), Distil-Whisper (STT), CosyVoice (TTS)
   inference:
-    image: ghcr.io/permissionlessweb/linguabridge-inference:v0.1.0
+    image: ghcr.io/permissionlessweb/linguabridge-unified:v0.2.0
     credentials:
       host: ghcr.io
       username: <GHCR_USERNAME>
@@ -30,6 +33,12 @@ services:
       - "DEVICE=cuda"
       - "TORCH_DTYPE=bfloat16"
       - "TRANSLATEGEMMA_MODEL=google/translategemma-4b-it"
+      - "STT_MODEL=distil-large-v3"
+      - "TTS_MODEL=CosyVoice2-0.5B"
+      - "ENABLE_STT=true"
+      - "ENABLE_TTS=true"
+      - "ENABLE_DIARIZATION=false"
+      - "HF_TOKEN=<HF_TOKEN>"
       - "HOST=0.0.0.0"
       - "PORT=8000"
       - "PYTHONUNBUFFERED=1"
@@ -38,35 +47,6 @@ services:
     expose:
       - port: 8000
         as: 8000
-        to:
-          - service: bot
-
-  # Voice inference service (STT/TTS/WebSocket) - GPU required
-  # Base: nvidia/cuda:12.4.1-runtime-ubuntu22.04, Python 3.11
-  # Models: Distil-Whisper (STT), CosyVoice (TTS), TranslateGemma (translation)
-  voice-inference:
-    image: ghcr.io/permissionlessweb/linguabridge-voice:v0.1.0
-    credentials:
-      host: ghcr.io
-      username: <GHCR_USERNAME>
-      password: <GHCR_PAT>
-    env:
-      - "DEVICE=cuda"
-      - "TORCH_DTYPE=bfloat16"
-      - "STT_MODEL=distil-large-v3"
-      - "TTS_MODEL=CosyVoice2-0.5B"
-      - "ENABLE_TTS=true"
-      - "ENABLE_DIARIZATION=false"
-      - "TRANSLATEGEMMA_MODEL=google/translategemma-4b-it"
-      - "HF_TOKEN=<HF_TOKEN>"
-      - "HOST=0.0.0.0"
-      - "PORT=8001"
-      - "PYTHONUNBUFFERED=1"
-      - "TRANSFORMERS_CACHE=/root/.cache/huggingface"
-      - "HF_HOME=/root/.cache/huggingface"
-    expose:
-      - port: 8001
-        as: 8001
         to:
           - service: bot
 
@@ -80,15 +60,15 @@ services:
       password: <GHCR_PAT>
     dependencies:
       - service: inference
-      - service: voice-inference
     env:
       # Admin provisioning (public key only - safe to expose)
       - "LINGUABRIDGE_ADMIN__PUBLIC_KEY=<YOUR_ADMIN_PUBLIC_KEY>"
       - "LINGUABRIDGE_ADMIN__PORT=9999"
       - "LINGUABRIDGE_ADMIN__HOST=0.0.0.0"
       # Internal service URLs (Akash DNS resolution)
+      # Both text and voice translation now use the same inference service
       - "LINGUABRIDGE_INFERENCE__URL=http://inference:8000"
-      - "LINGUABRIDGE_VOICE__URL=ws://voice-inference:8001/voice"
+      - "LINGUABRIDGE_VOICE__URL=ws://inference:8000/voice"
       - "LINGUABRIDGE_VOICE__ENABLE_TTS_PLAYBACK=false"
       - "LINGUABRIDGE_VOICE__DEFAULT_TARGET_LANGUAGE=en"
       # Web server
@@ -117,41 +97,22 @@ services:
 
 profiles:
   compute:
+    # Unified inference service (text + voice translation on single GPU)
+    # Memory increased to accommodate all models: TranslateGemma + STT + TTS
     inference:
       resources:
         cpu:
           units: 4
         memory:
-          size: 16Gi
+          size: 32Gi
         storage:
-          size: 20Gi
+          size: 40Gi
         gpu:
           units: 1
           attributes:
             vendor:
               nvidia:
-                - model: rtx3080
                 - model: rtx3090
-                - model: rtx4080
-                - model: rtx4090
-                - model: a100
-
-    voice-inference:
-      resources:
-        cpu:
-          units: 4
-        memory:
-          size: 24Gi
-        storage:
-          size: 30Gi
-        gpu:
-          units: 1
-          attributes:
-            vendor:
-              nvidia:
-                - model: rtx3080
-                - model: rtx3090
-                - model: rtx4080
                 - model: rtx4090
                 - model: a100
 
@@ -181,10 +142,7 @@ profiles:
       pricing:
         inference:
           denom: uakt
-          amount: 10000
-        voice-inference:
-          denom: uakt
-          amount: 12000
+          amount: 15000
         bot:
           denom: uakt
           amount: 1000
@@ -193,10 +151,6 @@ deployment:
   inference:
     dcloud:
       profile: inference
-      count: 1
-  voice-inference:
-    dcloud:
-      profile: voice-inference
       count: 1
   bot:
     dcloud:
