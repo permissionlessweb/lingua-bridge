@@ -50,161 +50,16 @@ sequenceDiagram
     VB->>TP: Play TTS in voice channel (optional)
 ```
 
-## Quick Start
-
-### Prerequisites
-
-- Rust 1.75+ (`rustup install stable`)
-- Python 3.10+ with pip
-- NVIDIA GPU with 8GB+ VRAM (for 4B model) or CPU (slower)
-- Discord bot token from [Discord Developer Portal](https://discord.com/developers/applications)
-
-### Step 1: Clone and Build
-
-```bash
-git clone https://github.com/yourusername/linguabridge.git
-cd linguabridge
-
-# Build the Rust bot and admin CLI
-cargo build --release
-```
-
-### Step 2: Set Up the Inference Service
-
-```bash
-cd inference
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the inference server
-DEVICE=cuda TRANSLATEGEMMA_MODEL=google/translategemma-4b-it python main.py
-```
-
-The inference service runs on `http://localhost:8000`. First startup downloads the model (~8GB for 4B).
-
-### Step 3: Generate Admin Keys
-
-In a new terminal:
-
-```bash
-cargo run -p admin-cli --release -- keygen
-```
-
-This creates two files:
-
-- `admin.key` - Your private key (keep this secret!)
-- `admin.pub` - Your public key (configure the bot with this)
-
-### Step 4: Configure the Bot
-
-Copy the example config:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set your admin public key:
-
-```bash
-# Paste the contents of admin.pub here
-LINGUABRIDGE_ADMIN__PUBLIC_KEY=your_base64_public_key_here
-```
-
-### Step 5: Start the Bot
-
-```bash
-cargo run --release
-```
-
-The bot will start and wait for provisioning. You'll see:
-
-```sh
-[INFO] LinguaBridge starting...
-[INFO] Admin provisioning server listening on 0.0.0.0:9999
-[INFO] Waiting for secrets to be provisioned...
-```
-
-### Step 6: Provision Your Discord Token
-
-In another terminal, run:
-
-```bash
-cargo run -p admin-cli --release -- provision \
-  --bot-url http://localhost:9999 \
-  --discord-token "YOUR_DISCORD_BOT_TOKEN" \
-  --admin-key admin.key
-```
-
-The bot will connect to Discord once provisioned:
-
-```sh
-[INFO] Secrets provisioned successfully!
-[INFO] Starting Discord bot...
-[INFO] Bot is ready!
-```
-
----
-
-## Discord Commands
-
-Once the bot is running, use these slash commands in your Discord server:
-
-### Server Setup (Admin)
-
-| Command | Description |
-|---------|-------------|
-| `/setup init` | Initialize LinguaBridge for your server |
-| `/setup channel #channel enable:true` | Enable translation in a text channel |
-| `/setup languages en,es,fr` | Set target languages for the server |
-| `/setup status` | View current configuration |
-
-### Text Translation
-
-| Command | Description |
-|---------|-------------|
-| `/translate text:Hello target:es` | Translate text to a specific language |
-| `/languages` | List all supported languages |
-| `/mylang es` | Set your preferred language |
-| `/mypreferences` | View your current preferences |
-| `/webview` | Get a link to the web translation viewer |
-
-### Voice Translation
-
-| Command | Description |
-|---------|-------------|
-| `/voice join [channel]` | Bot joins your voice channel (or specified channel) |
-| `/voice leave` | Bot leaves the voice channel |
-| `/voice status` | View voice translation status |
-| `/voice url [channel]` | Get public web URL for viewing voice transcripts |
-| `/voice transcript enable:true [text_channel] [languages]` | Enable transcript posting to Discord threads |
-| `/voiceconfig language:es tts:true` | Configure voice channel settings |
-
-### Initial Server Setup
-
-1. Run `/setup init` as a server admin
-2. Run `/setup channel #general enable:true` for each text channel to translate
-3. Run `/setup languages en,es,fr,de` to set target languages
-4. Users run `/mylang <code>` to set their preferred language
-
-### Voice Channel Setup
-
-1. Have the bot join your voice channel with `/voice join`
-2. Get the web view URL with `/voice url` and share it with participants
-3. Optionally enable Discord thread transcripts with `/voice transcript enable:true languages:en,es,fr`
-
 ---
 
 ## Supported Languages
 
 LinguaBridge supports 49 languages including:
 
+<center>
+
 | Code | Language | Code | Language | Code | Language |
-|------|----------|------|----------|------|----------|
+| ------ | ---------- | ------ | ---------- | ------ | ---------- |
 | ar | Arabic | fr | French | pl | Polish |
 | bn | Bengali | de | German | pt | Portuguese |
 | bg | Bulgarian | el | Greek | pa | Punjabi |
@@ -226,6 +81,7 @@ LinguaBridge supports 49 languages including:
 | | | no | Norwegian | | |
 | | | fa | Persian | | |
 
+</center>
 ---
 
 ## Voice Web View (End Users)
@@ -265,52 +121,6 @@ The web view includes an audio player for TTS (text-to-speech) playback:
 - Modern web browser (Chrome, Firefox, Safari, Edge)
 - JavaScript enabled
 - WebSocket support (all modern browsers)
-
----
-
-## Discord Thread Transcripts (Moderators)
-
-Moderators can configure the bot to post voice transcripts to Discord threads, creating a searchable archive of voice conversations.
-
-### Setting Up Thread Transcripts
-
-1. Join the voice channel you want to transcribe
-2. Run the command:
-
-   ```
-   /voice transcript enable:true text_channel:#transcripts languages:en,es,fr
-   ```
-
-3. The bot creates threads for each language:
-   - "Voice Translation - English"
-   - "Voice Translation - Spanish"
-   - "Voice Translation - French"
-
-### Transcript Format
-
-Messages appear in threads as:
-
-```
-**Username**
-> Original text in source language
-Translated text in target language
-```
-
-### Managing Transcripts
-
-| Action | Command |
-|--------|---------|
-| Enable transcripts | `/voice transcript enable:true languages:en,es` |
-| Disable transcripts | `/voice transcript enable:false` |
-| Change text channel | `/voice transcript enable:true text_channel:#new-channel` |
-| Add languages | Re-run the command with updated language list |
-
-### Notes
-
-- Threads are created in the specified text channel (or current channel if not specified)
-- Each language gets its own thread for organized archives
-- Threads auto-archive after 24 hours of inactivity (Discord default)
-- Transcripts persist in Discord even if the bot goes offline
 
 ---
 
@@ -438,91 +248,24 @@ services:
 
 ---
 
-## Docker Deployment
-
-### Local Development with Docker Compose
-
-```bash
-cd docker
-
-# Set your admin public key
-export ADMIN_PUBLIC_KEY="your_base64_public_key_here"
-
-# Build and start
-docker compose up -d
-```
-
-### Provision the Running Container
-
-```bash
-# From your local machine with the admin.key file
-cargo run -p admin-cli --release -- provision \
-  --bot-url http://your-server:9999 \
-  --discord-token "YOUR_DISCORD_BOT_TOKEN" \
-  --admin-key admin.key
-```
-
-### Akash Network Deployment
-
-LinguaBridge includes an Akash SDL file (`deploy.yaml`) for decentralized deployment. The secure admin provisioning system ensures your Discord token and API keys are never exposed to Akash providers.
-
-**Quick Setup:** Run the interactive configuration wizard to generate a ready-to-deploy SDL:
-
-```bash
-./scripts/configure-deploy.sh
-```
-
-This walks you through setting up GHCR credentials, admin keys, and image references, then generates `deploy-configured.yaml`.
-
-#### Step 1: Prepare for Deployment
-
-```bash
-# Generate your admin keypair
-cargo run -p admin-cli --release -- keygen
-
-# Note the public key from admin.pub - you'll need it
-cat admin.pub
-```
-
-#### Step 2: Configure the SDL
-
-Edit `deploy.yaml`:
-
-1. Replace `<YOUR_ADMIN_PUBLIC_KEY>` with your admin public key
-2. Update the Docker image URLs to your registry
-3. Optionally customize resource allocations
-
-#### Step 3: Deploy to Akash
-
-```bash
-# Using Akash CLI
-akash tx deployment create deploy.yaml --from your-wallet
-
-# Or use Akash Console (https://console.akash.network)
-# Upload deploy.yaml and follow the guided deployment
-```
-
-#### Step 4: Provision After Deployment
-
-Once deployed, note the assigned URI from Akash, then:
-
-```bash
-cargo run -p admin-cli --release -- provision \
-  --bot-url https://<your-akash-uri>:9999 \
-  --discord-token "YOUR_DISCORD_BOT_TOKEN" \
-  --admin-key admin.key
-```
-
 #### Security Model
 
 The provisioning uses:
 
-- Ed25519 signatures to verify admin identity
-- X25519 key exchange for forward secrecy
-- ChaCha20-Poly1305 authenticated encryption
-- Memory-only storage (secrets never written to disk)
+- **Ed25519 signatures** to verify admin identity
+- **X25519 key exchange** for forward secrecy
+- **ChaCha20-Poly1305** authenticated encryption
+- **Memory-only storage** (secrets never written to disk)
 
 This ensures that even Akash providers with access to your container cannot extract sensitive credentials.
+
+**Security Best Practices:**
+
+1. ✅ Never commit `admin.key` to git
+2. ✅ Store `admin.key` in a password manager
+3. ✅ Only expose port 9999 during initial provisioning
+4. ✅ Use strong, unique Discord bot tokens
+5. ✅ Rotate tokens if compromised
 
 ---
 

@@ -24,7 +24,7 @@ services:
   # Base: nvidia/cuda:12.4.1-runtime-ubuntu22.04, Python 3.11
   # Models: TranslateGemma (translation), Distil-Whisper (STT), CosyVoice (TTS)
   inference:
-    image: ghcr.io/permissionlessweb/linguabridge-unified:v0.2.0
+    image: ghcr.io/permissionlessweb/linguabridge-unified:v0.3.1
     credentials:
       host: ghcr.io
       username: <GHCR_USERNAME>
@@ -58,7 +58,7 @@ services:
   # LinguaBridge Discord bot and web server (CPU only)
   # Base: debian:trixie-slim, Rust binary
   bot:
-    image: ghcr.io/permissionlessweb/linguabridge-bot:v0.1.0
+    image: ghcr.io/permissionlessweb/linguabridge-bot:v0.3.1
     credentials:
       host: ghcr.io
       username: <GHCR_USERNAME>
@@ -72,14 +72,14 @@ services:
       - "LINGUABRIDGE_ADMIN__HOST=0.0.0.0"
       # Internal service URLs (Akash DNS resolution)
       # Both text and voice translation now use the same inference service
-      - "LINGUABRIDGE_INFERENCE__URL=http://inference:8000"
-      - "LINGUABRIDGE_VOICE__URL=ws://inference:8000/voice"
+      - "LINGUABRIDGE_INFERENCE__URL=http://inference.permissionless.money:8000"
+      - "LINGUABRIDGE_VOICE__URL=ws://inference.permissionless.money:8000/voice"
       - "LINGUABRIDGE_VOICE__ENABLE_TTS_PLAYBACK=false"
       - "LINGUABRIDGE_VOICE__DEFAULT_TARGET_LANGUAGE=en"
       # Web server
       - "LINGUABRIDGE_WEB__HOST=0.0.0.0"
       - "LINGUABRIDGE_WEB__PORT=3000"
-      - "LINGUABRIDGE_WEB__PUBLIC_URL=https://your-deployment.akash.network"
+      - "LINGUABRIDGE_WEB__PUBLIC_URL=https://lingua.permissionless.money"
       # Database (persistent storage)
       - "LINGUABRIDGE_DATABASE__URL=sqlite:///data/linguabridge.db?mode=rwc"
       - "RUST_LOG=linguabridge=info,tower_http=info"
