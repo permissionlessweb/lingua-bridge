@@ -35,6 +35,11 @@ dotenvy = "0.15"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 futures = "0.3"
 
+# LRU cache for voice transcription deduplication
+lru = "0.12"
+# Blake3 hashing for audio cache keys (fast, modern)
+blake3 = "1.5"
+
 # OAuth2 for Discord web auth
 oauth2 = "4.4"
 once_cell = "1.20"

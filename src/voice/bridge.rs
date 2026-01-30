@@ -3,7 +3,7 @@
 //! Bridges voice inference results to the web broadcast system and
 //! optionally to Discord thread transcripts.
 
-use super::VoiceInferenceResponse;
+use super::{VoiceInferenceResponse, VoiceTranscriptionCache};
 use crate::db::{DbPool, VoiceTranscriptRepo};
 use crate::web::BroadcastManager;
 use poise::serenity_prelude::{ChannelId, CreateMessage, Http};
@@ -17,6 +17,8 @@ pub struct VoiceBridge {
     voice_rx: broadcast::Receiver<VoiceInferenceResponse>,
     /// Broadcast manager for web clients
     broadcast: Arc<BroadcastManager>,
+    /// Voice transcription cache for storing inference results
+    cache: Arc<VoiceTranscriptionCache>,
     /// Optional database pool for transcript settings
     pool: Option<DbPool>,
     /// Optional HTTP client for posting to Discord threads
@@ -28,10 +30,12 @@ impl VoiceBridge {
     pub fn new(
         voice_rx: broadcast::Receiver<VoiceInferenceResponse>,
         broadcast: Arc<BroadcastManager>,
+        cache: Arc<VoiceTranscriptionCache>,
     ) -> Self {
         Self {
             voice_rx,
             broadcast,
+            cache,
             pool: None,
             http: None,
         }
@@ -41,12 +45,14 @@ impl VoiceBridge {
     pub fn with_thread_support(
         voice_rx: broadcast::Receiver<VoiceInferenceResponse>,
         broadcast: Arc<BroadcastManager>,
+        cache: Arc<VoiceTranscriptionCache>,
         pool: DbPool,
         http: Arc<Http>,
     ) -> Self {
         Self {
             voice_rx,
             broadcast,
+            cache,
             pool: Some(pool),
             http: Some(http),
         }
@@ -87,6 +93,7 @@ impl VoiceBridge {
                 original_text,
                 translated_text,
                 target_language,
+                audio_hash,
                 ..
             } => {
                 // Skip empty transcriptions
@@ -101,7 +108,18 @@ impl VoiceBridge {
                     user_id,
                     username,
                     text = original_text,
+                    audio_hash,
                     "Forwarding voice transcription to web clients"
+                );
+
+                // Cache the response for future requests with same audio + target language
+                let target_lang = Arc::from(target_language.as_str());
+                self.cache.put(*audio_hash, target_lang, response.clone()).await;
+
+                debug!(
+                    audio_hash,
+                    target_language,
+                    "Cached translation result"
                 );
 
                 // Forward to broadcast manager for web clients
@@ -188,8 +206,9 @@ impl VoiceBridge {
 pub fn spawn_voice_bridge(
     voice_rx: broadcast::Receiver<VoiceInferenceResponse>,
     broadcast: Arc<BroadcastManager>,
+    cache: Arc<VoiceTranscriptionCache>,
 ) -> tokio::task::JoinHandle<()> {
-    let bridge = VoiceBridge::new(voice_rx, broadcast);
+    let bridge = VoiceBridge::new(voice_rx, broadcast, cache);
     tokio::spawn(bridge.run())
 }
 
@@ -199,10 +218,11 @@ pub fn spawn_voice_bridge(
 pub fn spawn_voice_bridge_with_threads(
     voice_rx: broadcast::Receiver<VoiceInferenceResponse>,
     broadcast: Arc<BroadcastManager>,
+    cache: Arc<VoiceTranscriptionCache>,
     pool: DbPool,
     http: Arc<Http>,
 ) -> tokio::task::JoinHandle<()> {
-    let bridge = VoiceBridge::with_thread_support(voice_rx, broadcast, pool, http);
+    let bridge = VoiceBridge::with_thread_support(voice_rx, broadcast, cache, pool, http);
     tokio::spawn(bridge.run())
 }
 
@@ -214,7 +234,8 @@ mod tests {
     fn test_bridge_creation() {
         let (tx, rx) = broadcast::channel::<VoiceInferenceResponse>(10);
         let broadcast = Arc::new(BroadcastManager::new());
-        let bridge = VoiceBridge::new(rx, broadcast);
+        let cache = Arc::new(VoiceTranscriptionCache::new(100));
+        let bridge = VoiceBridge::new(rx, broadcast, cache);
         // Bridge created successfully
         drop(bridge);
         drop(tx);
@@ -226,7 +247,8 @@ mod tests {
         // Just verify the struct fields exist
         let (tx, rx) = broadcast::channel::<VoiceInferenceResponse>(10);
         let broadcast = Arc::new(BroadcastManager::new());
-        let bridge = VoiceBridge::new(rx, broadcast);
+        let cache = Arc::new(VoiceTranscriptionCache::new(100));
+        let bridge = VoiceBridge::new(rx, broadcast, cache);
         assert!(bridge.pool.is_none());
         assert!(bridge.http.is_none());
         drop(bridge);

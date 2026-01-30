@@ -79,6 +79,7 @@ impl WebMessage {
                 target_language,
                 tts_audio,
                 latency_ms,
+                audio_hash: _, // Ignore audio_hash for broadcast
             } => {
                 // Skip empty transcriptions
                 if original_text.is_empty() {

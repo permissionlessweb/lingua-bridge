@@ -17,7 +17,7 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("join", "leave", "status", "url", "transcript"),
+    subcommands("join", "leave", "status", "cachestats", "url", "transcript"),
     subcommand_required
 )]
 pub async fn voice(_ctx: Context<'_>) -> Result<(), Error> {
@@ -227,6 +227,47 @@ pub async fn status(ctx: Context<'_>) -> Result<(), Error> {
             ))
             .color(0xFEE75C)
     };
+
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
+    Ok(())
+}
+
+/// View translation cache statistics
+#[poise::command(slash_command, guild_only)]
+pub async fn cachestats(ctx: Context<'_>) -> Result<(), Error> {
+    let voice_manager = ctx
+        .data()
+        .voice
+        .as_ref()
+        .ok_or("Voice translation not initialized")?;
+
+    let cache = voice_manager.cache();
+    let stats = cache.stats();
+    let cache_size = cache.len().await;
+
+    let embed = serenity::CreateEmbed::default()
+        .title("Translation Cache Statistics")
+        .description("Performance metrics for audio translation caching")
+        .field("Cache Hits", format!("{}", stats.hits), true)
+        .field("Cache Misses", format!("{}", stats.misses), true)
+        .field(
+            "Hit Rate",
+            format!("{:.2}%", stats.hit_rate * 100.0),
+            true,
+        )
+        .field("Total Requests", format!("{}", stats.total), true)
+        .field("Cached Entries", format!("{}", cache_size), true)
+        .field("Cache Capacity", "1000", true)
+        .footer(serenity::CreateEmbedFooter::new(
+            "Cache reduces duplicate inference processing for repeated phrases",
+        ))
+        .color(if stats.hit_rate > 0.3 {
+            0x57F287 // Green if hit rate > 30%
+        } else if stats.hit_rate > 0.1 {
+            0xFEE75C // Yellow if hit rate > 10%
+        } else {
+            0x5865F2 // Blue otherwise
+        });
 
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
     Ok(())

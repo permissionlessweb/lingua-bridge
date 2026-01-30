@@ -4,7 +4,8 @@
 - allow user reinforcement feedback: users opt-into sharing/idenifying instances of incorrect translation.
   - marketplace for user agents to reccomend improvements
 - archive + playback of sessions (recorded + avitars of discord id)
-
 - better testing tools for audio resampling and streaming
 
 ## Next iterations
+
+- question -> rag retrieval -> translate

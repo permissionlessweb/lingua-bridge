@@ -2,6 +2,7 @@
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Discord SSRC (Synchronization Source) identifier for a speaker.
@@ -42,6 +43,7 @@ impl AudioPacket {
 }
 
 /// Aggregated audio segment ready for transcription.
+/// Config (target language, TTS settings) is passed separately when sending to inference.
 #[derive(Debug, Clone)]
 pub struct AudioSegment {
     /// Discord user ID
@@ -164,6 +166,8 @@ pub enum VoiceInferenceRequest {
         target_language: String,
         /// Whether to generate TTS audio
         generate_tts: bool,
+        /// Audio hash for cache correlation (Python must echo this back)
+        audio_hash: u64,
     },
     /// Ping to keep connection alive
     Ping,
@@ -201,6 +205,8 @@ pub enum VoiceInferenceResponse {
         tts_audio: Option<String>,
         /// Pipeline latency in milliseconds
         latency_ms: u64,
+        /// Audio hash echoed back for cache correlation
+        audio_hash: u64,
     },
     /// Pong response
     Pong,
@@ -229,8 +235,8 @@ pub struct VoiceChannelState {
     pub channel_id: u64,
     /// Whether translation is enabled
     pub translation_enabled: bool,
-    /// Target language for translations
-    pub target_language: String,
+    /// Target language for translations (Arc so cloning is cheap)
+    pub target_language: Arc<str>,
     /// Whether TTS playback is enabled
     pub tts_enabled: bool,
     /// Active speakers (SSRC -> user mapping)
@@ -243,9 +249,167 @@ impl Default for VoiceChannelState {
             guild_id: 0,
             channel_id: 0,
             translation_enabled: true,
-            target_language: "en".to_string(),
+            target_language: Arc::from("en"),
             tts_enabled: false,
             speakers: std::collections::HashMap::new(),
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_segment_duration() {
+        let start = Instant::now();
+        let end = start + Duration::from_millis(1500);
+
+        let segment = AudioSegment {
+            user_id: 123,
+            username: "Test".to_string(),
+            guild_id: 456,
+            channel_id: 789,
+            samples: vec![1, 2, 3],
+            start_time: start,
+            end_time: end,
+        };
+
+        let duration = segment.duration();
+        assert_eq!(duration.as_millis(), 1500);
+    }
+
+    #[test]
+    fn test_audio_segment_samples_f32() {
+        let segment = AudioSegment {
+            user_id: 1,
+            username: "Test".to_string(),
+            guild_id: 2,
+            channel_id: 3,
+            samples: vec![0, 16384, -16384, 32767, -32768],
+            start_time: Instant::now(),
+            end_time: Instant::now(),
+        };
+
+        let f32_samples = segment.samples_f32();
+
+        assert!((f32_samples[0] - 0.0).abs() < 0.001);
+        assert!((f32_samples[1] - 0.5).abs() < 0.01);
+        assert!((f32_samples[2] + 0.5).abs() < 0.01);
+        assert!((f32_samples[3] - 1.0).abs() < 0.01);
+        assert!((f32_samples[4] + 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_audio_segment_samples_bytes() {
+        let segment = AudioSegment {
+            user_id: 1,
+            username: "Test".to_string(),
+            guild_id: 2,
+            channel_id: 3,
+            samples: vec![256, 512],
+            start_time: Instant::now(),
+            end_time: Instant::now(),
+        };
+
+        let bytes = segment.samples_bytes();
+        assert_eq!(bytes.len(), 4); // 2 samples * 2 bytes
+
+        // Verify little-endian encoding
+        let reconstructed = vec![
+            i16::from_le_bytes([bytes[0], bytes[1]]),
+            i16::from_le_bytes([bytes[2], bytes[3]]),
+        ];
+        assert_eq!(reconstructed, vec![256, 512]);
+    }
+
+    #[test]
+    fn test_voice_inference_request_audio() {
+        let request = VoiceInferenceRequest::Audio {
+            guild_id: "123".to_string(),
+            channel_id: "456".to_string(),
+            user_id: "789".to_string(),
+            username: "TestUser".to_string(),
+            audio_base64: "dGVzdA==".to_string(),
+            sample_rate: 48000,
+            target_language: "es".to_string(),
+            generate_tts: true,
+            audio_hash: 12345,
+        };
+
+        match request {
+            VoiceInferenceRequest::Audio { audio_hash, .. } => {
+                assert_eq!(audio_hash, 12345);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_voice_inference_response_result() {
+        let response = VoiceInferenceResponse::Result {
+            guild_id: "111".to_string(),
+            channel_id: "222".to_string(),
+            user_id: "333".to_string(),
+            username: "User".to_string(),
+            original_text: "hello".to_string(),
+            translated_text: "hola".to_string(),
+            source_language: "en".to_string(),
+            target_language: "es".to_string(),
+            tts_audio: None,
+            latency_ms: 150,
+            audio_hash: 67890,
+        };
+
+        match response {
+            VoiceInferenceResponse::Result {
+                audio_hash,
+                latency_ms,
+                ..
+            } => {
+                assert_eq!(audio_hash, 67890);
+                assert_eq!(latency_ms, 150);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_voice_channel_state_default() {
+        let state = VoiceChannelState::default();
+
+        assert_eq!(state.guild_id, 0);
+        assert_eq!(state.channel_id, 0);
+        assert_eq!(state.translation_enabled, true);
+        assert_eq!(state.target_language.as_ref(), "en");
+        assert_eq!(state.tts_enabled, false);
+        assert_eq!(state.speakers.len(), 0);
+    }
+
+    #[test]
+    fn test_audio_packet_duration() {
+        let packet = AudioPacket {
+            ssrc: 12345,
+            user_id: Some(678),
+            username: Some("Test".to_string()),
+            samples: vec![0; 960], // 20ms at 48kHz
+            timestamp: Instant::now(),
+            sequence: 0,
+        };
+
+        let duration = packet.duration();
+        assert_eq!(duration.as_millis(), 20);
+    }
+
+    #[test]
+    fn test_discord_sample_rate_constant() {
+        assert_eq!(DISCORD_SAMPLE_RATE, 48000);
+    }
+
+    #[test]
+    fn test_samples_per_frame_constant() {
+        // 48000 Hz * 20ms / 1000 = 960 samples
+        assert_eq!(SAMPLES_PER_FRAME, 960);
+    }
+}
+

@@ -61,8 +61,8 @@ nano .env
 
 Example `.env`:
 ```bash
-BOT_TOKEN=MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.GhIJKL.mNoPqRsTuVwXyZaBcDeFgHiJkLmNoPqRsTuVw
-GUILD_ID=987654321098765432
+BOT_TOKEN=
+GUILD_ID=
 BACKEND_URL=https://lingua.provider1.akash.network:9999
 ```
 

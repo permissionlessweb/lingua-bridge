@@ -35,6 +35,7 @@
 
 pub mod bridge;
 pub mod buffer;
+pub mod cache;
 pub mod client;
 pub mod handler;
 pub mod playback;
@@ -42,7 +43,11 @@ pub mod types;
 
 pub use bridge::{spawn_voice_bridge, spawn_voice_bridge_with_threads, VoiceBridge};
 pub use buffer::AudioBufferManager;
-pub use client::{ConnectionState, VoiceClientConfig, VoiceClientError, VoiceInferenceClient};
+pub use cache::{CachedTranslation, CacheStats, VoiceTranscriptionCache};
+pub use client::{
+    ConnectionState, QueueFullStrategy, VoiceClientConfig, VoiceClientError,
+    VoiceInferenceClient,
+};
 pub use handler::VoiceReceiveHandler;
 pub use playback::{PlaybackManager, TTSPlaybackItem};
 pub use types::{
@@ -66,18 +71,23 @@ pub struct VoiceManager {
     handlers: DashMap<u64, Arc<VoiceReceiveHandler>>,
     /// Per-guild playback managers
     playback: DashMap<u64, Arc<PlaybackManager>>,
+    /// Voice transcription result cache (shared across all guilds)
+    cache: Arc<VoiceTranscriptionCache>,
 }
 
 impl VoiceManager {
     /// Create a new voice manager.
     pub fn new(songbird: Arc<Songbird>, config: VoiceClientConfig) -> Self {
         let inference_client = Arc::new(VoiceInferenceClient::new(config));
+        // Create LRU cache with 1000 entry capacity (~10-50 MB memory)
+        let cache = Arc::new(VoiceTranscriptionCache::new(1000));
 
         Self {
             songbird,
             inference_client,
             handlers: DashMap::new(),
             playback: DashMap::new(),
+            cache,
         }
     }
 
@@ -100,6 +110,7 @@ impl VoiceManager {
                     guild_id,
                     channel_id,
                     self.inference_client.clone(),
+                    self.cache.clone(),
                 ))
             })
             .clone()
@@ -138,6 +149,11 @@ impl VoiceManager {
     ) -> tokio::sync::broadcast::Receiver<VoiceInferenceResponse> {
         self.inference_client.subscribe()
     }
+
+    /// Get reference to voice transcription cache.
+    pub fn cache(&self) -> Arc<VoiceTranscriptionCache> {
+        self.cache.clone()
+    }
 }
 
 impl std::fmt::Debug for VoiceManager {
@@ -150,3 +166,138 @@ impl std::fmt::Debug for VoiceManager {
 
 // Re-export serenity for convenience
 use poise::serenity_prelude as serenity;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_voice_manager_creation() {
+        // Create mock Songbird instance
+        let songbird = Songbird::serenity();
+
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        // Verify initial state
+        assert_eq!(manager.handlers.len(), 0);
+        assert_eq!(manager.playback.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_get_or_create_handler() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        let guild_id = 123456;
+        let channel_id = 789012;
+
+        // First call should create handler
+        let handler1 = manager.get_or_create_handler(guild_id, channel_id);
+        assert_eq!(manager.handlers.len(), 1);
+
+        // Second call should return same handler
+        let handler2 = manager.get_or_create_handler(guild_id, channel_id);
+        assert_eq!(manager.handlers.len(), 1);
+
+        // Should be same Arc reference
+        assert!(Arc::ptr_eq(&handler1, &handler2));
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_remove_handler() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        let guild_id = 111222;
+        let channel_id = 333444;
+
+        // Create handler
+        let _handler = manager.get_or_create_handler(guild_id, channel_id);
+        assert_eq!(manager.handlers.len(), 1);
+
+        // Remove handler
+        manager.remove_handler(guild_id);
+        assert_eq!(manager.handlers.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_get_or_create_playback() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        let guild_id = 555666;
+
+        // First call should create playback manager
+        let playback1 = manager.get_or_create_playback(guild_id);
+        assert_eq!(manager.playback.len(), 1);
+
+        // Second call should return same manager
+        let playback2 = manager.get_or_create_playback(guild_id);
+        assert_eq!(manager.playback.len(), 1);
+
+        // Should be same Arc reference
+        assert!(Arc::ptr_eq(&playback1, &playback2));
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_inference_client_access() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        let client = manager.inference_client();
+
+        // Should be able to clone inference client reference
+        let _client2 = manager.inference_client();
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_subscribe_results() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        // Should be able to subscribe to results
+        let _rx = manager.subscribe_results();
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_cache_access() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        let cache = manager.cache();
+
+        // Should be able to clone cache reference
+        let _cache2 = manager.cache();
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_songbird_access() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(Arc::clone(&songbird), config);
+
+        let retrieved_songbird = manager.songbird();
+
+        // Should be same Arc reference
+        assert!(Arc::ptr_eq(&songbird, &retrieved_songbird));
+    }
+
+    #[tokio::test]
+    async fn test_voice_manager_debug() {
+        let songbird = Songbird::serenity();
+        let config = VoiceClientConfig::default();
+        let manager = VoiceManager::new(songbird, config);
+
+        // Should be able to debug print
+        let debug_str = format!("{:?}", manager);
+        assert!(debug_str.contains("VoiceManager"));
+    }
+}
+

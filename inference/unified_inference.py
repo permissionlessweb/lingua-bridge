@@ -28,6 +28,14 @@ from voice.stt import SpeechToText
 from voice.tts import TextToSpeech, audio_to_base64
 from translator import TranslateGemmaTranslator
 from detector import LanguageDetector
+from voice_protocol import (
+    parse_binary_frame,
+    parse_text_frame,
+    create_result_response,
+    create_error_response,
+    create_pong_response,
+    VoiceProtocolError,
+)
 
 # Load environment variables
 load_dotenv()
@@ -307,33 +315,42 @@ async def voice_websocket(websocket: WebSocket):
     """
     WebSocket endpoint for voice translation.
 
-    Message format (JSON):
-    {
-        "type": "Audio",
-        "guild_id": "123",
-        "channel_id": "456",
-        "user_id": "789",
-        "username": "User",
-        "audio_base64": "<base64 PCM i16 48kHz mono>",
-        "sample_rate": 48000,
-        "target_language": "en",
-        "generate_tts": false
-    }
+    Supports both binary and text frames:
 
-    Response format:
-    {
-        "type": "Result",
-        "guild_id": "123",
-        "channel_id": "456",
-        "user_id": "789",
-        "username": "User",
-        "original_text": "Hola mundo",
-        "translated_text": "Hello world",
-        "source_language": "es",
-        "target_language": "en",
-        "tts_audio": "<base64 WAV>",
-        "latency_ms": 450
-    }
+    Binary frame format (recommended - 33% bandwidth savings):
+        [4 bytes: header_length as u32 LE]
+        [header_length bytes: JSON header]
+        [remaining bytes: raw PCM i16 LE samples]
+
+    Text frame format (JSON, backward compatible):
+        {
+            "type": "Audio",
+            "guild_id": "123",
+            "channel_id": "456",
+            "user_id": "789",
+            "username": "User",
+            "audio_base64": "<base64 PCM i16 48kHz mono>",
+            "sample_rate": 48000,
+            "target_language": "en",
+            "generate_tts": false,
+            "audio_hash": 12345678901234567890
+        }
+
+    Response format (JSON text frame):
+        {
+            "type": "Result",
+            "guild_id": "123",
+            "channel_id": "456",
+            "user_id": "789",
+            "username": "User",
+            "original_text": "Hola mundo",
+            "translated_text": "Hello world",
+            "source_language": "es",
+            "target_language": "en",
+            "tts_audio": "<base64 WAV>",
+            "latency_ms": 450,
+            "audio_hash": 12345678901234567890
+        }
     """
     await websocket.accept()
     logger.info("Voice WebSocket connection established")
@@ -347,45 +364,147 @@ async def voice_websocket(websocket: WebSocket):
 
     try:
         while True:
-            # Receive message
-            data = await websocket.receive_text()
-            message = json.loads(data)
+            # Receive message (can be text or binary)
+            raw_message = await websocket.receive()
 
-            msg_type = message.get("type")
+            # Parse based on message type
+            try:
+                if "bytes" in raw_message:
+                    # Binary frame
+                    binary_data = raw_message["bytes"]
+                    logger.debug(f"Received binary frame: {len(binary_data)} bytes")
 
-            if msg_type == "Ping":
-                await websocket.send_json({"type": "Pong"})
-                continue
+                    header, samples = parse_binary_frame(binary_data)
+                    msg_type = header.get("type")
 
-            if msg_type == "Configure":
-                # Handle configuration updates
-                logger.info(f"Configuration update: {message}")
-                continue
+                    if msg_type == "Audio":
+                        # Binary audio frame
+                        start_time = time.time()
 
-            if msg_type == "Audio":
-                # Process audio
-                start_time = time.time()
+                        try:
+                            result = await process_audio_binary(header, samples)
+                            result["latency_ms"] = int((time.time() - start_time) * 1000)
+                            await websocket.send_text(result)
+                        except Exception as e:
+                            logger.error(f"Audio processing error: {e}", exc_info=True)
+                            error_response = create_error_response(str(e), "PROCESSING_ERROR")
+                            await websocket.send_text(error_response)
+                    else:
+                        logger.warning(f"Unknown binary message type: {msg_type}")
 
-                try:
-                    result = await process_audio(message)
-                    result["latency_ms"] = int((time.time() - start_time) * 1000)
-                    await websocket.send_json(result)
-                except Exception as e:
-                    logger.error(f"Audio processing error: {e}")
-                    await websocket.send_json({
-                        "type": "Error",
-                        "message": str(e),
-                        "code": "PROCESSING_ERROR",
-                    })
+                elif "text" in raw_message:
+                    # Text frame (JSON)
+                    text_data = raw_message["text"]
+                    logger.debug(f"Received text frame: {len(text_data)} bytes")
+
+                    message = parse_text_frame(text_data)
+                    msg_type = message.get("type")
+
+                    if msg_type == "Ping":
+                        await websocket.send_text(create_pong_response())
+                        continue
+
+                    if msg_type == "Configure":
+                        # Handle configuration updates
+                        logger.info(f"Configuration update: {message}")
+                        continue
+
+                    if msg_type == "Audio":
+                        # Text audio frame (legacy base64 format)
+                        start_time = time.time()
+
+                        try:
+                            result = await process_audio_text(message)
+                            result["latency_ms"] = int((time.time() - start_time) * 1000)
+                            await websocket.send_json(result)
+                        except Exception as e:
+                            logger.error(f"Audio processing error: {e}", exc_info=True)
+                            await websocket.send_json({
+                                "type": "Error",
+                                "message": str(e),
+                                "code": "PROCESSING_ERROR",
+                            })
+                else:
+                    logger.warning(f"Unknown WebSocket message format: {raw_message.keys()}")
+
+            except VoiceProtocolError as e:
+                logger.error(f"Protocol error: {e}")
+                error_response = create_error_response(str(e), "PROTOCOL_ERROR")
+                await websocket.send_text(error_response)
 
     except WebSocketDisconnect:
         logger.info("Voice WebSocket connection closed")
     except Exception as e:
-        logger.error(f"Voice WebSocket error: {e}")
+        logger.error(f"Voice WebSocket error: {e}", exc_info=True)
 
 
-async def process_audio(message: dict) -> dict:
-    """Process incoming audio and return translation result."""
+async def process_audio_binary(header: dict, samples: np.ndarray) -> str:
+    """
+    Process incoming binary audio frame and return translation result.
+
+    Args:
+        header: Parsed JSON header with metadata
+        samples: Raw PCM samples (i16)
+
+    Returns:
+        JSON string response (use send_text, not send_json)
+    """
+    guild_id = header["guild_id"]
+    channel_id = header["channel_id"]
+    user_id = header["user_id"]
+    username = header["username"]
+    sample_rate = header.get("sample_rate", DISCORD_SAMPLE_RATE)
+    target_language = header.get("target_language", "en")
+    generate_tts = header.get("generate_tts", False)
+    audio_hash = header.get("audio_hash", 0)  # CRITICAL: Must echo back
+
+    # Convert i16 samples to float32 for processing
+    audio_float = samples.astype(np.float32) / 32768.0
+
+    logger.info(
+        f"Processing binary audio: {len(samples)} samples, "
+        f"{len(samples) / sample_rate:.2f}s from {username}, "
+        f"hash={audio_hash}"
+    )
+
+    # Process audio (transcribe + translate + TTS)
+    result = await _process_audio_internal(
+        audio_float=audio_float,
+        sample_rate=sample_rate,
+        guild_id=guild_id,
+        channel_id=channel_id,
+        user_id=user_id,
+        username=username,
+        target_language=target_language,
+        generate_tts=generate_tts,
+    )
+
+    # Create response JSON (echo back audio_hash for cache)
+    return create_result_response(
+        guild_id=result["guild_id"],
+        channel_id=result["channel_id"],
+        user_id=result["user_id"],
+        username=result["username"],
+        original_text=result["original_text"],
+        translated_text=result["translated_text"],
+        source_language=result["source_language"],
+        target_language=result["target_language"],
+        tts_audio=result["tts_audio"],
+        latency_ms=result.get("latency_ms", 0),
+        audio_hash=audio_hash,  # Echo back for cache correlation
+    )
+
+
+async def process_audio_text(message: dict) -> dict:
+    """
+    Process incoming text audio frame (legacy base64 format).
+
+    Args:
+        message: Parsed JSON message with base64 audio
+
+    Returns:
+        Dict response (use send_json)
+    """
     guild_id = message["guild_id"]
     channel_id = message["channel_id"]
     user_id = message["user_id"]
@@ -394,6 +513,7 @@ async def process_audio(message: dict) -> dict:
     sample_rate = message.get("sample_rate", DISCORD_SAMPLE_RATE)
     target_language = message.get("target_language", "en")
     generate_tts = message.get("generate_tts", False)
+    audio_hash = message.get("audio_hash", 0)  # Optional for text frames
 
     # Decode audio
     audio_bytes = base64.b64decode(audio_base64)
@@ -401,10 +521,55 @@ async def process_audio(message: dict) -> dict:
     audio_float = audio.astype(np.float32) / 32768.0
 
     logger.info(
-        f"Processing audio: {len(audio)} samples, "
+        f"Processing text audio: {len(audio)} samples, "
         f"{len(audio) / sample_rate:.2f}s from {username}"
     )
 
+    # Process audio (transcribe + translate + TTS)
+    result = await _process_audio_internal(
+        audio_float=audio_float,
+        sample_rate=sample_rate,
+        guild_id=guild_id,
+        channel_id=channel_id,
+        user_id=user_id,
+        username=username,
+        target_language=target_language,
+        generate_tts=generate_tts,
+    )
+
+    # Add audio_hash if provided (for cache correlation)
+    if audio_hash:
+        result["audio_hash"] = audio_hash
+
+    return result
+
+
+async def _process_audio_internal(
+    audio_float: np.ndarray,
+    sample_rate: int,
+    guild_id: str,
+    channel_id: str,
+    user_id: str,
+    username: str,
+    target_language: str,
+    generate_tts: bool,
+) -> dict:
+    """
+    Internal audio processing logic shared by binary and text handlers.
+
+    Args:
+        audio_float: Audio samples as float32 [-1.0, 1.0]
+        sample_rate: Sample rate in Hz
+        guild_id: Discord guild ID
+        channel_id: Discord channel ID
+        user_id: Discord user ID
+        username: Discord username
+        target_language: Target language code
+        generate_tts: Whether to generate TTS audio
+
+    Returns:
+        Dict with transcription/translation results
+    """
     # Step 1: Transcribe
     if stt is None:
         raise RuntimeError("STT model not loaded")

@@ -9,6 +9,27 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, warn};
 
+/// Audio segment bundled with translation config for sending to inference.
+#[derive(Debug, Clone)]
+struct AudioRequest {
+    segment: AudioSegment,
+    target_language: String,
+    generate_tts: bool,
+    /// Audio hash for cache correlation (computed from samples)
+    audio_hash: u64,
+}
+
+/// Strategy for handling full audio queue (backpressure).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueFullStrategy {
+    /// Drop oldest audio (keep recent audio) - best for real-time voice
+    DropOldest,
+    /// Drop new audio (preserve old audio in queue)
+    DropNewest,
+    /// Block until space available (risks deadlock, use with caution)
+    Block,
+}
+
 /// Connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -29,8 +50,12 @@ pub struct VoiceClientConfig {
     pub max_reconnect_attempts: u32,
     /// Request timeout
     pub request_timeout: Duration,
-    /// Ping interval
+    /// Ping interval (for detecting dead connections)
     pub ping_interval: Duration,
+    /// Maximum audio queue size before backpressure kicks in
+    pub max_queue_size: usize,
+    /// Strategy for handling full queue
+    pub queue_full_strategy: QueueFullStrategy,
 }
 
 impl Default for VoiceClientConfig {
@@ -40,7 +65,12 @@ impl Default for VoiceClientConfig {
             reconnect_delay: Duration::from_secs(2),
             max_reconnect_attempts: 10,
             request_timeout: Duration::from_secs(30),
-            ping_interval: Duration::from_secs(30),
+            // Reduced from 30s to 10s for faster dead connection detection
+            ping_interval: Duration::from_secs(10),
+            // 500 entries = ~10 seconds of audio at 1.5s streaming chunks
+            max_queue_size: 500,
+            // Drop newest for real-time voice (old audio is already stale)
+            queue_full_strategy: QueueFullStrategy::DropNewest,
         }
     }
 }
@@ -49,8 +79,8 @@ impl Default for VoiceClientConfig {
 pub struct VoiceInferenceClient {
     config: VoiceClientConfig,
     state: Arc<RwLock<ConnectionState>>,
-    /// Channel to send audio segments for processing
-    audio_tx: mpsc::Sender<AudioSegment>,
+    /// Channel to send audio requests (segment + config) for processing
+    audio_tx: mpsc::Sender<AudioRequest>,
     /// Channel to receive transcription results
     _result_rx: broadcast::Receiver<VoiceInferenceResponse>,
     /// Broadcast sender for results (shared with handler)
@@ -60,7 +90,8 @@ pub struct VoiceInferenceClient {
 impl VoiceInferenceClient {
     /// Create a new voice inference client.
     pub fn new(config: VoiceClientConfig) -> Self {
-        let (audio_tx, audio_rx) = mpsc::channel(100);
+        // Use configured queue size (with backpressure handling)
+        let (audio_tx, audio_rx) = mpsc::channel(config.max_queue_size);
         let (result_tx, _result_rx) = broadcast::channel(100);
 
         let client = Self {
@@ -89,36 +120,94 @@ impl VoiceInferenceClient {
     }
 
     /// Send audio segment for processing.
+    ///
+    /// Handles backpressure according to the configured strategy.
+    ///
+    /// The audio_hash is used to correlate responses with requests for caching.
     pub async fn send_audio(
         &self,
         segment: AudioSegment,
-        _target_language: &str,
-        _generate_tts: bool,
+        target_language: &str,
+        generate_tts: bool,
+        audio_hash: u64,
     ) -> Result<(), VoiceClientError> {
         if !self.is_connected().await {
             return Err(VoiceClientError::NotConnected);
         }
 
-        // Send via internal channel to connection handler
-        // The connection handler will convert to WebSocket message
-        self.audio_tx
-            .send(segment)
-            .await
-            .map_err(|_| VoiceClientError::ChannelClosed)?;
+        // Package segment with config and audio hash for cache correlation
+        let req = AudioRequest {
+            segment,
+            target_language: target_language.to_string(),
+            generate_tts,
+            audio_hash,
+        };
 
-        Ok(())
+        // Try non-blocking send first
+        match self.audio_tx.try_send(req) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(req)) => {
+                // Queue is full - handle based on strategy
+                match self.config.queue_full_strategy {
+                    QueueFullStrategy::DropNewest => {
+                        warn!(
+                            queue_size = self.config.max_queue_size,
+                            "Audio queue full, dropping newest segment (backpressure)"
+                        );
+                        Err(VoiceClientError::QueueFull)
+                    }
+                    QueueFullStrategy::DropOldest => {
+                        // In production, implement a bounded queue with pop_front capability
+                        // For now, just drop new and log
+                        // TODO: Implement proper oldest-drop with custom queue
+                        warn!(
+                            queue_size = self.config.max_queue_size,
+                            "Audio queue full, dropping segment (backpressure)"
+                        );
+                        Err(VoiceClientError::QueueFull)
+                    }
+                    QueueFullStrategy::Block => {
+                        // Fall back to blocking send (risks deadlock but preserves all audio)
+                        warn!(
+                            queue_size = self.config.max_queue_size,
+                            "Audio queue full, blocking until space available"
+                        );
+                        self.audio_tx
+                            .send(req)
+                            .await
+                            .map_err(|_| VoiceClientError::ChannelClosed)?;
+                        Ok(())
+                    }
+                }
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(VoiceClientError::ChannelClosed),
+        }
     }
 
     /// Subscribe to transcription results.
     pub fn subscribe(&self) -> broadcast::Receiver<VoiceInferenceResponse> {
         self.result_tx.subscribe()
     }
+
+    /// Broadcast a cached result (for cache hits).
+    ///
+    /// This allows cached responses to flow through the same result channel
+    /// as live inference responses, ensuring consistent handling.
+    pub async fn broadcast_cached_result(
+        &self,
+        response: VoiceInferenceResponse,
+    ) -> Result<(), VoiceClientError> {
+        self.result_tx
+            .send(response)
+            .map_err(|_| VoiceClientError::BroadcastFailed)?;
+        Ok(())
+    }
 }
 
 /// Connection handler task.
 async fn connection_handler(
     config: VoiceClientConfig,
-    mut audio_rx: mpsc::Receiver<AudioSegment>,
+    mut audio_rx: mpsc::Receiver<AudioRequest>,
     result_tx: broadcast::Sender<VoiceInferenceResponse>,
     state: Arc<RwLock<ConnectionState>>,
 ) {
@@ -174,30 +263,41 @@ async fn connection_handler(
 
                 loop {
                     tokio::select! {
-                        Some(segment) = audio_rx.recv() => {
-                            // Convert to request
-                            let audio_bytes: Vec<u8> = segment
-                                .samples
-                                .iter()
-                                .flat_map(|s| s.to_le_bytes())
-                                .collect();
-                            let audio_base64 = BASE64.encode(&audio_bytes);
+                        Some(req) = audio_rx.recv() => {
+                            let segment = &req.segment;
 
-                            let request = VoiceInferenceRequest::Audio {
+                            // Use binary WebSocket frames instead of base64 text
+                            // Format: JSON header + raw PCM data
+                            let header = VoiceInferenceRequest::Audio {
                                 guild_id: segment.guild_id.to_string(),
                                 channel_id: segment.channel_id.to_string(),
                                 user_id: segment.user_id.to_string(),
                                 username: segment.username.clone(),
-                                audio_base64,
+                                audio_base64: String::new(), // Placeholder, will send binary
                                 sample_rate: super::types::DISCORD_SAMPLE_RATE,
-                                target_language: "en".to_string(), // TODO: get from channel config
-                                generate_tts: false, // TODO: get from channel config
+                                target_language: req.target_language.clone(),
+                                generate_tts: req.generate_tts,
+                                audio_hash: req.audio_hash, // For cache correlation
                             };
 
-                            let msg = serde_json::to_string(&request)
+                            // Serialize header as JSON
+                            let header_json = serde_json::to_string(&header)
                                 .expect("Failed to serialize request");
+                            let header_bytes = header_json.as_bytes();
 
-                            if let Err(e) = write.send(Message::Text(msg.into())).await {
+                            // Build binary message: [4-byte header length][header JSON][raw PCM i16 samples]
+                            let header_len = header_bytes.len() as u32;
+                            let mut binary_msg = Vec::with_capacity(
+                                4 + header_bytes.len() + segment.samples.len() * 2
+                            );
+                            binary_msg.extend_from_slice(&header_len.to_le_bytes());
+                            binary_msg.extend_from_slice(header_bytes);
+                            // Raw PCM samples (no base64 encoding = 33% bandwidth savings)
+                            for sample in &segment.samples {
+                                binary_msg.extend_from_slice(&sample.to_le_bytes());
+                            }
+
+                            if let Err(e) = write.send(Message::Binary(binary_msg)).await {
                                 error!(error = %e, "Failed to send audio to inference");
                                 break;
                             }
@@ -205,7 +305,8 @@ async fn connection_handler(
                             debug!(
                                 user_id = segment.user_id,
                                 duration_ms = segment.duration().as_millis(),
-                                "Sent audio to inference service"
+                                samples = segment.samples.len(),
+                                "Sent audio to inference service (binary)"
                             );
                         }
 
@@ -262,6 +363,12 @@ pub enum VoiceClientError {
 
     #[error("Request timeout")]
     Timeout,
+
+    #[error("Audio queue full (backpressure triggered)")]
+    QueueFull,
+
+    #[error("Failed to broadcast cached result")]
+    BroadcastFailed,
 
     #[error("WebSocket error: {0}")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),

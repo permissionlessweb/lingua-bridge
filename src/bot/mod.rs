@@ -4,7 +4,7 @@ pub mod handler;
 use crate::config::AppConfig;
 use crate::db::DbPool;
 use crate::translation::TranslationClient;
-use crate::voice::{spawn_voice_bridge, VoiceClientConfig, VoiceManager};
+use crate::voice::{spawn_voice_bridge, QueueFullStrategy, VoiceClientConfig, VoiceManager};
 use crate::web::broadcast::BroadcastManager;
 use poise::serenity_prelude::{self as serenity, FullEvent, GatewayIntents};
 use songbird::SerenityInit;
@@ -142,7 +142,9 @@ pub async fn start_bot_with_token(
         reconnect_delay: Duration::from_secs(2),
         max_reconnect_attempts: 10,
         request_timeout: Duration::from_secs(30),
-        ping_interval: Duration::from_secs(30),
+        ping_interval: Duration::from_secs(10), // Faster dead connection detection
+        max_queue_size: 500, // ~10 seconds of audio buffer
+        queue_full_strategy: QueueFullStrategy::DropOldest, // Real-time voice
     };
 
     // Create voice manager
@@ -150,7 +152,8 @@ pub async fn start_bot_with_token(
 
     // Spawn voice bridge to forward results to web clients
     let voice_rx = voice_manager.subscribe_results();
-    let _bridge_handle = spawn_voice_bridge(voice_rx, broadcast.clone());
+    let cache = voice_manager.cache(); // Get cache reference for response caching
+    let _bridge_handle = spawn_voice_bridge(voice_rx, broadcast.clone(), cache);
     info!("Voice bridge started - forwarding transcriptions to web clients");
 
     let framework = create_framework(pool, translator, broadcast, Some(voice_manager)).await?;

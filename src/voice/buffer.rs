@@ -16,6 +16,14 @@ const MAX_SPEECH_DURATION_SECS: u64 = 30;
 /// Silence duration to consider speech ended (ms).
 const SILENCE_TIMEOUT_MS: u64 = 800;
 
+/// Streaming chunk interval: send audio every N milliseconds for lower latency (ms).
+/// Send chunks while speaking to enable streaming transcription instead of waiting for silence.
+const STREAMING_CHUNK_INTERVAL_MS: u64 = 1500;
+
+/// Minimum samples before sending a streaming chunk (avoid sending tiny chunks).
+/// At 48kHz, this is ~0.5 seconds of audio.
+const MIN_CHUNK_SAMPLES: usize = DISCORD_SAMPLE_RATE as usize / 2;
+
 /// Simple energy-based VAD threshold.
 const VAD_ENERGY_THRESHOLD: f32 = 0.01;
 
@@ -36,6 +44,8 @@ struct UserBuffer {
     speech_start: Option<Instant>,
     /// Last time we received audio
     last_audio_time: Instant,
+    /// Last time we sent a streaming chunk
+    last_chunk_sent: Option<Instant>,
     /// Is user currently speaking?
     is_speaking: bool,
 }
@@ -50,6 +60,7 @@ impl UserBuffer {
             samples: Vec::with_capacity(SAMPLES_PER_FRAME * 50), // ~1 second initial capacity
             speech_start: None,
             last_audio_time: Instant::now(),
+            last_chunk_sent: None,
             is_speaking: false,
         }
     }
@@ -75,6 +86,7 @@ impl UserBuffer {
     }
 
     /// Check if we should flush this buffer.
+    /// Supports both streaming (timer-based chunks) and silence detection.
     fn should_flush(&self) -> bool {
         if !self.is_speaking || self.samples.is_empty() {
             return false;
@@ -85,7 +97,19 @@ impl UserBuffer {
         let speech_duration = now.duration_since(speech_start);
         let silence_duration = now.duration_since(self.last_audio_time);
 
-        // Flush if silence timeout reached
+        // STREAMING: Send chunks periodically while speaking for lower latency
+        // This enables partial results instead of waiting for complete utterances
+        if self.samples.len() >= MIN_CHUNK_SAMPLES {
+            let time_since_last_chunk = self.last_chunk_sent
+                .map(|t| now.duration_since(t))
+                .unwrap_or(speech_duration);
+
+            if time_since_last_chunk >= Duration::from_millis(STREAMING_CHUNK_INTERVAL_MS) {
+                return true;
+            }
+        }
+
+        // SILENCE DETECTION: Flush if silence timeout reached (legacy behavior)
         if silence_duration >= Duration::from_millis(SILENCE_TIMEOUT_MS) {
             let total_duration = self.samples.len() as f64 / DISCORD_SAMPLE_RATE as f64;
             if total_duration >= MIN_SPEECH_DURATION_MS as f64 / 1000.0 {
@@ -93,7 +117,7 @@ impl UserBuffer {
             }
         }
 
-        // Flush if max duration reached
+        // MAX DURATION: Flush if max duration reached
         if speech_duration >= Duration::from_secs(MAX_SPEECH_DURATION_SECS) {
             return true;
         }
@@ -107,18 +131,29 @@ impl UserBuffer {
             return None;
         }
 
+        let now = Instant::now();
         let segment = AudioSegment {
             user_id: self.user_id,
             username: self.username.clone(),
             guild_id: self.guild_id,
             channel_id: self.channel_id,
             samples: std::mem::take(&mut self.samples),
-            start_time: self.speech_start.unwrap_or_else(Instant::now),
-            end_time: Instant::now(),
+            start_time: self.speech_start.unwrap_or(now),
+            end_time: now,
         };
 
-        self.speech_start = None;
-        self.is_speaking = false;
+        // Update streaming state
+        self.last_chunk_sent = Some(now);
+
+        // If silence detected, reset speaking state
+        let silence_duration = now.duration_since(self.last_audio_time);
+        if silence_duration >= Duration::from_millis(SILENCE_TIMEOUT_MS) {
+            self.speech_start = None;
+            self.is_speaking = false;
+            self.last_chunk_sent = None;
+        }
+        // Otherwise keep speaking state (streaming mode)
+
         self.samples = Vec::with_capacity(SAMPLES_PER_FRAME * 50);
 
         debug!(
